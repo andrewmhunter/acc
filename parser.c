@@ -7,13 +7,12 @@
 #include "expression.h"
 #include "type.h"
 #include "identifier.h"
-
-#define MIN(A, B) \
-    ((A) < (B) ? (A) : (B))
+#include "util.h"
 
 
-Parser newParser(Scanner scan) {
-    Parser parser = {.scan = scan, .hasPeekToken = false};
+
+Parser newParser(Arena* staticLifetime, Scanner scan) {
+    Parser parser = {.scan = scan, .staticLifetime = staticLifetime, .hasPeekToken = false};
     return parser;
 }
 
@@ -60,8 +59,7 @@ static void verror(Parser* parser, Token* token, const char* message, va_list ar
     if (token != NULL) {
         fprintf(stderr, "at '%.*s': ", token->length, token->start);
     }
-    va_list valist;
-    vfprintf(stderr, message, valist);
+    vfprintf(stderr, message, args);
     fprintf(stderr, "\n");
 }
 
@@ -90,6 +88,7 @@ static void recover(Parser* parser) {
             case TOK_PAREN_RIGHT:
             case TOK_BRACE_RIGHT:
                 next(parser);
+                return;
             case TOK_EOF:
                 return;
             default:
@@ -105,6 +104,11 @@ static void consume(Parser* parser, TokenType kind, const char* message) {
         return;
     }
     errorAtNext(parser, message);
+}
+
+static Identifier makeIdentifier(Token token) {
+    Identifier id = {.start = token.start, .length = token.length};
+    return id;
 }
 
 static bool nextIsType(Parser* parser) {
@@ -134,7 +138,7 @@ static Type* intType(Parser* parser) {
         size = SIZE_BYTE;
     }
 
-    return typeInteger(sign, size);
+    return typeInteger(parser->staticLifetime, sign, size);
 }
 
 static Type* type(Parser* parser) {
@@ -147,7 +151,7 @@ static Type* type(Parser* parser) {
             break;
         case TOK_VOID:
             next(parser);
-            type = typeNew(TYPE_VOID);
+            type = typeNew(parser->staticLifetime, TYPE_VOID);
             break;
         default:
             assert(false && "invalid type");
@@ -155,7 +159,7 @@ static Type* type(Parser* parser) {
     }
 
     while (match(parser, TOK_ASTERIX, NULL)) {
-        type = typePointer(type);
+        type = typePointer(parser->staticLifetime, type);
     }
     return type;
 }
@@ -211,7 +215,10 @@ static Expression* primary(Parser* parser, bool parenthesized) {
         return expr;
     }
     if (match(parser, TOK_NUMBER, &tok)) {
-        return exprLiteral(integerLiteral(parser, tok));
+        return exprLiteral(parser->staticLifetime, integerLiteral(parser, tok));
+    }
+    if (match(parser, TOK_IDENTIFIER, &tok)) {
+        return exprVariable(parser->staticLifetime, makeIdentifier(tok));
     }
     errorAtNext(parser, "unexpected token");
     return NULL;
@@ -229,13 +236,13 @@ static Expression* prefix(Parser* parser) {
         if (nextIsType(parser)) {
             Type* ty = type(parser);
             consume(parser, TOK_PAREN_RIGHT, "expected ')'");
-            return exprCast(ty, prefix(parser));
+            return exprCast(parser->staticLifetime, ty, prefix(parser));
         }
         return suffix(parser, true);
     } else {
         return suffix(parser, false);
     }
-    return exprUnary(op, prefix(parser));
+    return exprUnary(parser->staticLifetime, op, prefix(parser));
 }
 
 static Expression* product(Parser* parser) {
@@ -250,7 +257,7 @@ static Expression* product(Parser* parser) {
             return left;
         }
         Expression* right = prefix(parser);
-        left = exprBinary(op, left, right);
+        left = exprBinary(parser->staticLifetime, op, left, right);
     }
 }
 
@@ -266,7 +273,7 @@ static Expression* sum(Parser* parser) {
             return left;
         }
         Expression* right = product(parser);
-        left = exprBinary(op, left, right);
+        left = exprBinary(parser->staticLifetime, op, left, right);
     }
 }
 
@@ -276,7 +283,7 @@ static Expression* assignment(Parser* parser) {
         return left;
     }
     Expression* right = assignment(parser);
-    return exprBinary(BINARY_ASSIGN, left, right);
+    return exprAssign(parser->staticLifetime, BINARY_NONE, left, right);
 }
 
 Expression* expression(Parser* parser) {
@@ -314,6 +321,25 @@ static Statement* whileLoop(Parser* parser) {
     return stmt;
 }
 
+static Statement* variableDeclaration(Parser* parser) {
+    Statement* stmt = stmtNew(STATEMENT_VARIABLE);
+    stmt->variableDeclaration.type = type(parser);
+
+    if (!nextIs(parser, TOK_IDENTIFIER)) {
+        errorAtNext(parser, "expected identifier");
+        return NULL;
+    }
+    stmt->variableDeclaration.id = makeIdentifier(next(parser));
+    
+    stmt->variableDeclaration.expr = NULL;
+    if (match(parser, TOK_EQUAL, NULL)) {
+        stmt->variableDeclaration.expr = expression(parser);
+    }
+
+    consume(parser, TOK_SEMICOLON, "expected ';' after declaration");
+    return stmt;
+}
+
 static Statement* expressionStatement(Parser* parser) {
     Expression* expr = expression(parser);
     Statement* stmt = stmtNew(STATEMENT_EXPRESSION);
@@ -337,7 +363,7 @@ static Statement* block(Parser* parser) {
 
 Statement* statement(Parser* parser) {
     if (nextIsType(parser)) {
-        assert(false && "variables not implemented yet");
+        return variableDeclaration(parser);
     } else if (match(parser, TOK_IF, NULL)) {
         return conditional(parser);
     } else if (match(parser, TOK_WHILE, NULL)) {

@@ -3,6 +3,7 @@
 
 #include <stdlib.h>
 #include <stdbool.h>
+#include <stdio.h>
 #include "expression.h"
 #include "type.h"
 
@@ -11,6 +12,7 @@ typedef enum {
     STATEMENT_IF,
     STATEMENT_WHILE,
     STATEMENT_BLOCK,
+    STATEMENT_VARIABLE,
 } StatementType;
 
 struct Statement;
@@ -35,6 +37,11 @@ typedef struct Statement {
             struct Statement* inner;
             bool isDoWhile;
         } whileLoop;
+        struct {
+            Type* type;
+            Identifier id;
+            Expression* expr;
+        } variableDeclaration;
         StatementList block;
     };
 } Statement;
@@ -42,7 +49,7 @@ typedef struct Statement {
 
 Statement* stmtNew(StatementType type);
 void stmtFree(Statement* stmt);
-void stmtPrint(Statement* stmt, int depth);
+void stmtPrint(FILE* file, Statement* stmt, int depth);
 
 StatementList stmtListNew();
 void stmtListFree(StatementList* list);

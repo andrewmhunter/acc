@@ -1,0 +1,7 @@
+-std=c17
+-Wall
+-Wextra
+-Wno-unused-function
+-Wimplicit-fallthrough
+-Wno-unused-parameter
+

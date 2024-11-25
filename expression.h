@@ -2,12 +2,16 @@
 #define EXPRESSION_H
 
 #include "type.h"
+#include "identifier.h"
+#include "mem.h"
 
 typedef enum {
     EXPR_BINARY,
     EXPR_UNARY,
     EXPR_LITERAL,
     EXPR_CAST,
+    EXPR_VARIABLE,
+    EXPR_ASSIGN,
 } ExpressionType;
 
 typedef enum {
@@ -15,7 +19,7 @@ typedef enum {
     BINARY_SUBTRACT = '-',
     BINARY_MULTIPLY = '*',
     BINARY_DIVIDE = '/',
-    BINARY_ASSIGN = '=',
+    BINARY_NONE = '\\',
 } BinaryOperation;
 
 typedef enum {
@@ -38,18 +42,21 @@ typedef struct Expression {
             Type* type;
             struct Expression* inner;
         } cast;
+        Identifier variable;
         int literal;
     };
 } Expression;
 
-Expression* exprBinary(BinaryOperation operation, Expression* left, Expression* right);
-Expression* exprUnary(UnaryOperation operation, Expression* inner);
-Expression* exprLiteral(int value);
-Expression* exprCast(Type* type, Expression* inner);
+Expression* exprBinary(Arena* arena, BinaryOperation operation, Expression* left, Expression* right);
+Expression* exprAssign(Arena* arena, BinaryOperation operation, Expression* left, Expression* right);
+Expression* exprUnary(Arena* arena, UnaryOperation operation, Expression* inner);
+Expression* exprLiteral(Arena* arena, int value);
+Expression* exprCast(Arena* arena, Type* type, Expression* inner);
+Expression* exprVariable(Arena* arena, Identifier name);
 
-void exprFree(Expression* expr);
+void exprPrint(FILE* file, Expression* expr);
 
-void exprPrint(Expression* expr);
+bool exprEquals(Expression* expr0, Expression* expr1);
 
 #endif
 

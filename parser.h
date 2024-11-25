@@ -4,6 +4,7 @@
 #include "scanner.h"
 #include "expression.h"
 #include "statement.h"
+#include "mem.h"
 
 typedef struct {
     Scanner scan;
@@ -11,9 +12,11 @@ typedef struct {
     bool hasPeekToken;
     bool hadError;
     bool recoveringError;
+    Arena* staticLifetime;
+    //Arena* compileLifetime;
 } Parser;
 
-Parser newParser(Scanner scan);
+Parser newParser(Arena* staticLifetime, Scanner scan);
 Expression* expression(Parser* parser);
 Statement* statement(Parser* parser);
 

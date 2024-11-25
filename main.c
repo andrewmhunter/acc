@@ -1,7 +1,12 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include "scanner.h"
+#include "compiler.h"
 #include "parser.h"
+#include "mem.h"
+
+#include "diag.h"
 
 int main(int argc, char** argv) {
     if (argc < 2) {
@@ -14,6 +19,7 @@ int main(int argc, char** argv) {
         perror("Error");
         exit(1);
     }
+
     fseek(file, 0, SEEK_END);
     long fileSize = ftell(file);
     rewind(file);
@@ -22,13 +28,25 @@ int main(int argc, char** argv) {
     text[fileSize] = '\0';
     fclose(file);
 
+    Arena staticLifetime = arenaNew();
+
     Scanner scan = newScanner(text);
-    Parser parser = newParser(scan);
+    Parser parser = newParser(&staticLifetime, scan);
 
     Statement* stmt = statement(&parser);
-    stmtPrint(stmt, 0);
+
+    if (parser.hadError) {
+        return 2;
+    }
+
+    stmtPrint(stdout, stmt, 0);
+
+    Compiler compiler = compilerNew(&staticLifetime);
+    compileFunction(&compiler, stmt);
+
     stmtFree(stmt);
 
+    arenaFree(&staticLifetime);
     free(text);
     return 0;
 }
