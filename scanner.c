@@ -155,6 +155,22 @@ static Token makeEither(Scanner* scan, TokenType regular, char second, TokenType
     return makeToken(scan, regular);
 }
 
+static Token makeEither3(
+        Scanner* scan,
+        TokenType token0,
+        char char1,
+        TokenType token1,
+        char char2,
+        TokenType token2
+) {
+    if (match(scan, char1)) {
+        return makeToken(scan, token1);
+    } else if (match(scan, char2)) {
+        return makeToken(scan, token2);
+    }
+    return makeToken(scan, token0);
+}
+
 Token nextToken(Scanner* scan) {
     skipWhitespace(scan);
 
@@ -188,10 +204,18 @@ Token nextToken(Scanner* scan) {
             return makeToken(scan, TOK_BRACE_LEFT);
         case '}':
             return makeToken(scan, TOK_BRACE_RIGHT);
+        case '&':
+            return makeEither(scan, TOK_BIT_AND, '&', TOK_LOG_AND);
+        case '|':
+            return makeEither(scan, TOK_BIT_OR, '|', TOK_LOG_OR);
         case '=':
             return makeEither(scan, TOK_EQUAL, '=', TOK_EQUAL_EQUAL);
         case '<':
-            return makeEither(scan, TOK_LESS, '=', TOK_LESS_EQUAL);
+            return makeEither3(scan, TOK_LESS, '=', TOK_LESS_EQUAL, '<', TOK_LEFT_SHIFT);
+        case '>':
+            return makeEither3(scan, TOK_GREATER, '=', TOK_GREATER_EQUAL, '>', TOK_RIGHT_SHIFT);
+        case '!':
+            return makeEither(scan, TOK_BANG, '=', TOK_NOT_EQUAL);
     }
 
     return makeError(scan, "unexpected character");

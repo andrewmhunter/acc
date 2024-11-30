@@ -4,4 +4,5 @@
 -Wno-unused-function
 -Wimplicit-fallthrough
 -Wno-unused-parameter
+-Wint-conversion
 

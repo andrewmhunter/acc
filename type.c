@@ -10,32 +10,35 @@ Type* typeNew(Arena* arena, TypeTag tag) {
     return type;
 }
 
-Type* typeInteger(Arena* arena, Signedness sign, IntegerSize size) {
+const Type* typeInteger(Arena* arena, Signedness sign, IntegerSize size) {
     Type* type = typeNew(arena, TYPE_INTEGER);
     type->integer.sign = sign;
     type->integer.size = size;
     return type;
 }
 
-Type* typePointer(Arena* arena, Type* inner) {
+const Type* typePointer(Arena* arena, const Type* inner) {
     Type* type = typeNew(arena, TYPE_POINTER);
     type->pointer = inner;
     return type;
 }
 
-Type* typeCondition(Arena* arena, Flag flag, bool negate) {
-    Type* type = typeNew(arena, TYPE_CONDITION);
-    type->condition.flag = flag;
-    type->condition.negate = negate;
-    return type;
-}
-
-Type* typeVoid() {
+const Type* typeVoid() {
     static Type inner = (Type) {.tag = TYPE_VOID};
     return &inner;
 }
 
-int typeSize(Type* type) {
+const Type* typeUChar() {
+    static Type inner = (Type) {.tag = TYPE_INTEGER, .integer = {.size = SIZE_BYTE, .sign = SIGN_UNSIGNED}};
+    return &inner;
+}
+
+const Type* typeAnyInteger() {
+    static Type inner = (Type) {.tag = TYPE_INTEGER, .integer = {.size = SIZE_ANY, .sign = SIGN_EITHER}};
+    return &inner;
+}
+
+int typeSize(const Type* type) {
     switch (type->tag) {
         case TYPE_INTEGER:
             switch (type->integer.size) {
@@ -51,13 +54,12 @@ int typeSize(Type* type) {
             break;
         case TYPE_POINTER:
             return WORD_SIZE;
-        case TYPE_CONDITION:
         case TYPE_VOID:
             return 1;
     }
 }
 
-void typePrint(FILE* file, Type* type) {
+void typePrint(FILE* file, const Type* type) {
     switch (type->tag) {
         case TYPE_INTEGER:
             if (type->integer.sign == SIGN_UNSIGNED) {
@@ -77,28 +79,10 @@ void typePrint(FILE* file, Type* type) {
         case TYPE_VOID:
             fprintf(file, "void");
             break;
-        case TYPE_CONDITION:
-            fprintf(file, "<cond ");
-            if (type->condition.negate) {
-                fprintf(file, "not ");
-            }
-            switch (type->condition.flag) {
-                case FLAG_C:
-                    fprintf(file, "carry");
-                    break;
-                case FLAG_Z:
-                    fprintf(file, "zero");
-                    break;
-                case FLAG_N:
-                    fprintf(file, "negative");
-                    break;
-            }
-            fprintf(file, ">");
-            break;
     }
 }
 
-bool typeEquals(Type* t0, Type* t1) {
+bool typeEquals(const Type* t0, const Type* t1) {
     if (t0->tag != t1->tag) {
         return false;
     }
@@ -109,15 +93,12 @@ bool typeEquals(Type* t0, Type* t1) {
                 && t0->integer.sign == t1->integer.sign;
         case TYPE_POINTER:
             return typeEquals(t0->pointer, t1->pointer);
-        case TYPE_CONDITION:
-            return t0->condition.flag == t1->condition.flag
-                && t0->condition.negate == t1->condition.negate;
         case TYPE_VOID:
             return true;
     }
 }
 
-bool typeCompatible(Type* t0, Type* t1) {
+bool typeCompatible(const Type* t0, const Type* t1) {
     if (t0->tag != t1->tag) {
         return false;
     }
@@ -137,23 +118,20 @@ bool typeCompatible(Type* t0, Type* t1) {
             return typeEquals(t0->pointer, t1->pointer)
                 || t0->pointer->tag == TYPE_VOID
                 || t1->pointer->tag == TYPE_VOID;
-        case TYPE_CONDITION:
-            return t0->condition.flag == t1->condition.flag
-                && t0->condition.negate == t1->condition.negate;
         case TYPE_VOID:
             return true;
     }
 }
 
-bool isInteger(Type* type) {
+bool isInteger(const Type* type) {
     return type->tag == TYPE_INTEGER;
 }
 
-bool isPointer(Type* type) {
+bool isPointer(const Type* type) {
     return type->tag == TYPE_POINTER;
 }
 
-Type* commonType(Type* t0, Type* t1) {
+const Type* commonType(const Type* t0, const Type* t1) {
     ASSERT(isInteger(t0) && isInteger(t1), "can only find the common type of integers");
 
     // If the integers are the same size, sign precedence goes: either < signed < unsigned

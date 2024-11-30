@@ -6,16 +6,6 @@
 #include "mem.h"
 #include "util.h"
 
-// Calculates the log base 2 of a integer, rounded up to next integer.
-size_t ceilLog2(size_t number) {
-    if (number <= 1) {
-        return 0;
-    }
-    int leadingZeroes = __builtin_clzll(number - 1);
-    size_t bitSize = sizeof(number) * 8;
-    return bitSize - leadingZeroes;
-}
-
 size_t growSize(size_t minSize) {
     if (minSize == 0) {
         return 0;

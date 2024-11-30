@@ -7,7 +7,7 @@
 
 typedef struct {
     Identifier ident;
-    Type* type;
+    const Type* type;
     int depth;
     size_t offset;
 } StackElement;
@@ -16,6 +16,7 @@ struct Compiler;
 
 typedef struct {
     struct Compiler* compiler;
+    Arena* lifetime;
     Instruction* instructions;
     size_t instructionsLength;
     size_t instructionsCapacity;
@@ -29,7 +30,7 @@ typedef struct {
 
 typedef struct Compiler {
     int label;
-    Arena* staticLifetime;
+    Arena* lifetime;
 } Compiler;
 
 Compiler compilerNew(Arena* staticLifetime);

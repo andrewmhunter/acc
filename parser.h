@@ -17,7 +17,7 @@ typedef struct {
 } Parser;
 
 Parser newParser(Arena* staticLifetime, Scanner scan);
-Expression* expression(Parser* parser);
+const Expression* expression(Parser* parser);
 Statement* statement(Parser* parser);
 
 #endif

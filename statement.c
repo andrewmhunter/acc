@@ -39,7 +39,7 @@ static void printIndent(FILE* file, int depth) {
     }
 }
 
-void stmtPrint(FILE* file, Statement* stmt, int depth) {
+void stmtPrint(FILE* file, Statement* stmt, int depth, bool firstLine) {
     printIndent(file, depth);
     depth += 1;
     switch (stmt->type) {
@@ -51,23 +51,38 @@ void stmtPrint(FILE* file, Statement* stmt, int depth) {
             fprintf(file, "if (");
             exprPrint(file, stmt->conditional.condition);
             fprintf(file, ")\n");
-            stmtPrint(file, stmt->conditional.inner, depth - 1);
+
+            if (firstLine) {
+                return;
+            }
+
+            stmtPrint(file, stmt->conditional.inner, depth - 1, firstLine);
             if (stmt->conditional.onElse != NULL) {
                 printIndent(file, depth - 1);
                 fprintf(file, "else\n");
-                stmtPrint(file, stmt->conditional.onElse, depth - 1);
+                stmtPrint(file, stmt->conditional.onElse, depth - 1, firstLine);
             }
             break;
         case STATEMENT_WHILE:
             fprintf(file, "while (");
             exprPrint(file, stmt->whileLoop.condition);
             fprintf(file, ")\n");
-            stmtPrint(file, stmt->whileLoop.inner, depth - 1);
+
+            if (firstLine) {
+                return;
+            }
+
+            stmtPrint(file, stmt->whileLoop.inner, depth - 1, firstLine);
             break;
         case STATEMENT_BLOCK:
             fprintf(file, "{\n");
+
+            if (firstLine) {
+                return;
+            }
+
             for (size_t i = 0; i < stmt->block.length; ++i) {
-                stmtPrint(file, stmt->block.data[i], depth);
+                stmtPrint(file, stmt->block.data[i], depth, firstLine);
             }
             printIndent(file, depth - 1);
             fprintf(file, "}");

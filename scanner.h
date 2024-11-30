@@ -11,10 +11,15 @@ typedef enum {
     TOK_SEMICOLON,
     TOK_EQUAL,
     TOK_EQUAL_EQUAL,
-    TOK_LESS,
-    TOK_LESS_EQUAL,
+    TOK_NOT_EQUAL,
+    TOK_BANG,
     TOK_NUMBER,
     TOK_IDENTIFIER,
+
+    TOK_LESS,
+    TOK_LESS_EQUAL,
+    TOK_GREATER,
+    TOK_GREATER_EQUAL,
 
     TOK_IF,
     TOK_ELSE,
@@ -29,6 +34,15 @@ typedef enum {
     TOK_MINUS,
     TOK_ASTERIX,
     TOK_SLASH,
+
+    TOK_LEFT_SHIFT,
+    TOK_RIGHT_SHIFT,
+
+    TOK_BIT_AND,
+    TOK_BIT_OR,
+
+    TOK_LOG_AND,
+    TOK_LOG_OR,
 
     TOK_EOF,
     TOK_ERROR,

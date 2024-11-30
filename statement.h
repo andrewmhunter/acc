@@ -26,21 +26,21 @@ typedef struct {
 typedef struct Statement {
     StatementType type;
     union {
-        Expression* expression;
+        const Expression* expression;
         struct {
-            Expression* condition;
+            const Expression* condition;
             struct Statement* inner;
             struct Statement* onElse;
         } conditional;
         struct {
-            Expression* condition;
+            const Expression* condition;
             struct Statement* inner;
             bool isDoWhile;
         } whileLoop;
         struct {
-            Type* type;
+            const Type* type;
             Identifier id;
-            Expression* expr;
+            const Expression* expr;
         } variableDeclaration;
         StatementList block;
     };
@@ -49,7 +49,7 @@ typedef struct Statement {
 
 Statement* stmtNew(StatementType type);
 void stmtFree(Statement* stmt);
-void stmtPrint(FILE* file, Statement* stmt, int depth);
+void stmtPrint(FILE* file, Statement* stmt, int depth, bool firstLine);
 
 StatementList stmtListNew();
 void stmtListFree(StatementList* list);

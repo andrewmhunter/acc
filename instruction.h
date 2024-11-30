@@ -3,8 +3,7 @@
 
 #include "type.h"
 #include "expression.h"
-
-typedef int Label;
+#include "condition.h"
 
 typedef enum {
     VALUE_DISCARD,
@@ -12,18 +11,11 @@ typedef enum {
     VALUE_DIRECT,
 } ValueType;
 
-typedef enum {
-    CONTENTS_EXPRESSION,
-    CONTENTS_LABEL,
-    CONTENTS_STACK,
-} ValueContents;
-
-typedef struct {
+typedef struct Value {
     ValueType kind;
-    ValueContents contents;
-    Type* type;
+    const Type* type;
     union {
-        Expression* expression;
+        const Expression* expression;
         Label label;
         size_t stackOffset;
     };
@@ -33,7 +25,7 @@ typedef enum {
     TARGET_DISCARD,
     TARGET_VALUE,
     TARGET_ANY,
-//    TARGET_CONDITION,
+    //TARGET_TYPE,
 } TargetType;
 
 typedef struct {
@@ -44,14 +36,21 @@ typedef struct {
 #define DISCARD_TARGET ((Target) {.kind = TARGET_DISCARD})
 #define ANY_TARGET ((Target) {.kind = TARGET_ANY})
 
-typedef enum {
+typedef struct {
+    Invert invert;
+    bool putInA;
+    bool jumpToLabel;
+    Value label;
+} ConditionTarget;
+
+typedef enum: char {
     REG_A,
     REG_C,
     REG_D,
     REG_F,
 } Reg;
 
-typedef enum {
+typedef enum: char {
     ADDRESS_IMPLIED,
     ADDRESS_REGISTER,
     ADDRESS_VALUE,
@@ -60,19 +59,15 @@ typedef enum {
 
 typedef struct {
     AddressType kind;
-    union {
-        Reg reg;
-        struct {
-            Value value;
-            int index;
-        };
-    };
+    Reg reg;
 } Address;
 
 #define IMPLIED_ADDRESS ((Address){.kind = ADDRESS_IMPLIED})
 
-typedef enum {
+typedef enum: char {
+    INS_LABEL,
     INS_MOV,
+    INS_NOT,
     INS_ADD,
     INS_ADDC,
     INS_SUB,
@@ -80,6 +75,18 @@ typedef enum {
     INS_OR,
     INS_AND,
     INS_JMP,
+    INS_JZ,
+    INS_JNZ,
+    INS_JC,
+    INS_JNC,
+    INS_JN,
+    INS_JP,
+    INS_INC,
+    INS_INCC,
+    INS_DEC,
+    INS_DECB,
+    INS_SHL,
+    INS_ROL,
     INS_RET,
 } Opcode;
 
@@ -87,32 +94,61 @@ typedef struct {
     Opcode opcode;
     Address dest;
     Address src;
+    Value value;
 } Instruction;
-
 
 // Initialization
 
+#define GET_ADDRESS_VALUE() ((Address) {.kind = ADDRESS_VALUE, .reg = REG_D})
+
 Address addressReg(Reg reg);
-Address addressValue(Value value, int index);
+
 Target targetValue(Value value);
-Value valueImmediateExpr(Type* type, Expression* expr);
-Value valueDirectExpr(Type* type, Expression* expr);
-Value valueDirectStack(Type* type, size_t stackOffset);
+
+ConditionTarget conditionTarget(Value label, Invert invert);
+ConditionTarget invertConditionTarget(ConditionTarget target);
+
+Value valueImmediateExpr(const Type* type, const Expression* expr);
+Value valueConstant(Arena* arena, const Type* type, int literal);
+Value valueStackOffset(Arena* arena, const Type* type, int offset);
+Value valueDirectExpr(const Type* type, const Expression* expr);
 Value valueDiscard();
+Value valueZero(const Type* type);
+
+bool isImmediate(const Value* value);
+bool isDirect(const Value* value);
+bool immediateResolved(const Value* value, int* output);
+
+Instruction instruction2Value(
+        Arena* arena,
+        Opcode opcode,
+        Address dest,
+        Address src,
+        Value value,
+        int index
+    );
+
+Instruction instruction1Value(
+        Arena* arena,
+        Opcode opcode,
+        Address address,
+        Value value,
+        int index
+    );
+
 Instruction instruction2(Opcode opcode, Address dest, Address src);
 Instruction instruction1(Opcode opcode, Address address);
 Instruction instruction0(Opcode opcode);
 
-bool valueEquals(Value value0, Value value1);
+bool valueEquals(const Value* value0, const Value* value1);
 
 // Printing
 
 void printReg(FILE* file, Reg reg);
-void printContents(FILE* file, Value value);
-void printValue(FILE* file, Value value, int index);
-void printAddress(FILE* file, Address* address);
+void printValue(FILE* file, const Value* value);
+void printAddress(FILE* file, const Address* address, const Value* value);
 void printOpcode(FILE* file, Opcode opcode);
-void printInstruction(FILE* file, Instruction* ins);
+void printInstruction(FILE* file, const Instruction* ins);
 
 
 #endif

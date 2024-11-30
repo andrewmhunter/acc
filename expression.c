@@ -1,5 +1,6 @@
 #include "expression.h"
 #include "mem.h"
+#include "diag.h"
 #include <stdlib.h>
 #include <stdio.h>
 
@@ -9,7 +10,76 @@ static Expression* exprNew(Arena* arena, ExpressionType type) {
     return expr;
 }
 
-Expression* exprBinary(Arena* arena, BinaryOperation operation, Expression* left, Expression* right) {
+static const Expression* binaryLiteral(
+        Arena* arena,
+        BinaryOperation operation,
+        const Expression* leftExpr,
+        const Expression* rightExpr
+) {
+    if (((isStackOffset(leftExpr) && isLiteral(rightExpr))
+        || (isStackOffset(rightExpr) && isLiteral(leftExpr)))
+        && (operation == BINARY_ADD)
+    ) {
+        return exprStackOffset(arena, leftExpr->literal + rightExpr->literal);
+    }
+
+    if (!isLiteral(leftExpr) || !isLiteral(rightExpr)) {
+        return NULL;
+    }
+
+    int left = leftExpr->literal;
+    int right = rightExpr->literal;
+
+    int result = 0;
+    switch (operation) {
+        case BINARY_ADD:
+            result = left + right;
+            break;
+        case BINARY_SUBTRACT:
+            result = left - right;
+            break;
+        case BINARY_MULTIPLY:
+            result = left * right;
+            break;
+        case BINARY_DIVIDE:
+            ASSERT(right != 0, "cannot divide by 0");
+            result = left / right;
+            break;
+        case BINARY_SHIFT_LEFT:
+            result = left << right;
+            break;
+        case BINARY_SHIFT_RIGHT:
+            result = left >> right;
+            break;
+        case BINARY_EQUAL:
+            result = left == right;
+            break;
+        case BINARY_NOT_EQUAL:
+        case BINARY_LOGICAL_AND:
+        case BINARY_LOGICAL_OR:
+        case BINARY_LESS:
+        case BINARY_LESS_EQUAL:
+        case BINARY_GREATER:
+        case BINARY_GREATER_EQUAL:
+            return NULL;
+        case BINARY_NONE:
+            UNREACHABLE();
+    }
+
+    return exprLiteral(arena, result);
+}
+
+const Expression* exprBinary(
+        Arena* arena,
+        BinaryOperation operation,
+        const Expression* left,
+        const Expression* right
+) {
+    const Expression* exprlit = binaryLiteral(arena, operation, left, right);
+    if (exprlit != NULL) {
+        return exprlit;
+    }
+
     Expression* expr = exprNew(arena, EXPR_BINARY);
     expr->binary.operation = operation;
     expr->binary.left = left;
@@ -17,7 +87,12 @@ Expression* exprBinary(Arena* arena, BinaryOperation operation, Expression* left
     return expr;
 }
 
-Expression* exprAssign(Arena* arena, BinaryOperation operation, Expression* left, Expression* right) {
+const Expression* exprAssign(
+        Arena* arena,
+        BinaryOperation operation,
+        const Expression* left,
+        const Expression* right
+) {
     Expression* expr = exprNew(arena, EXPR_ASSIGN);
     expr->binary.operation = operation;
     expr->binary.left = left;
@@ -25,34 +100,179 @@ Expression* exprAssign(Arena* arena, BinaryOperation operation, Expression* left
     return expr;
 }
 
-Expression* exprUnary(Arena* arena, UnaryOperation operation, Expression* inner) {
+const Expression* unaryLiteral(
+        Arena* arena,
+        UnaryOperation operation,
+        const Expression* innerExpr
+) {
+    if (!isLiteral(innerExpr)) {
+        return NULL;
+    }
+
+    int inner = innerExpr->literal;
+
+    int result = 0;
+    switch (operation) {
+        case UNARY_NEGATE:
+            result = -inner;
+            break;
+        case UNARY_NOT:
+        case UNARY_ADDRESSOF:
+        case UNARY_DEREFERENCE:
+            return NULL;
+            break;
+    }
+
+    return exprLiteral(arena, result);
+}
+
+const Expression* exprUnary(
+        Arena* arena,
+        UnaryOperation operation,
+        const Expression* inner
+) {
+    const Expression* litexpr = unaryLiteral(arena, operation, inner);
+    if (litexpr != NULL) {
+        return litexpr;
+    }
+
     Expression* expr = exprNew(arena, EXPR_UNARY);
     expr->unary.operation = operation;
     expr->unary.inner = inner;
     return expr;
 }
 
-Expression* exprLiteral(Arena* arena, int value) {
+#define LITERAL_INTERN_MIN -16
+#define LITERAL_INTERN_MAX 32
+
+static Expression internedLiterals[LITERAL_INTERN_MAX - LITERAL_INTERN_MIN + 1] = {};
+
+const Expression* exprLiteral(Arena* arena, int value) {
+    if (value >= LITERAL_INTERN_MIN && value <= LITERAL_INTERN_MAX) {
+        size_t index = value - LITERAL_INTERN_MIN;
+        if (internedLiterals[index].type == 0) {
+            internedLiterals[index].type = EXPR_LITERAL;
+            internedLiterals[index].literal = value;
+        }
+        //fprintf(stderr, "Got interned literal: %d\n", value);
+        return &internedLiterals[index];
+    }
+
+    //fprintf(stderr, "Allocated literal: %d\n", value);
+
     Expression* expr = exprNew(arena, EXPR_LITERAL);
     expr->literal = value;
     return expr;
 }
 
-Expression* exprCast(Arena* arena, Type* type, Expression* inner) {
+const Expression* exprLabel(Arena* arena, int value) {
+    Expression* expr = exprNew(arena, EXPR_LABEL);
+    expr->label = value;
+    return expr;
+}
+
+#define STACKOFFSET_INTERN_MAX 32
+
+static Expression stackOffsets[STACKOFFSET_INTERN_MAX + 1] = {};
+
+const Expression* exprStackOffset(Arena* arena, int value) {
+    if (value >= 0 && value <= STACKOFFSET_INTERN_MAX) {
+        if (stackOffsets[value].type == 0) {
+            stackOffsets[value].type = EXPR_STACKOFFSET;
+            stackOffsets[value].stackOffset = value;
+        }
+        //fprintf(stderr, "Got interned stackOffset: %d\n", value);
+        return &stackOffsets[value];
+    }
+
+    //fprintf(stderr, "Allocated stackoffset: %d\n", value);
+
+    Expression* expr = exprNew(arena, EXPR_STACKOFFSET);
+    expr->stackOffset = value;
+    return expr;
+}
+
+const Expression* exprCast(Arena* arena, const Type* type, const Expression* inner) {
     Expression* expr = exprNew(arena, EXPR_CAST);
     expr->cast.type = type;
     expr->cast.inner = inner;
     return expr;
 }
 
-Expression* exprVariable(Arena* arena, Identifier name) {
+const Expression* exprVariable(Arena* arena, Identifier name) {
     Expression* expr = exprNew(arena, EXPR_VARIABLE);
     expr->variable = name;
     return expr;
 }
 
+static void printBinaryOperator(FILE* file, BinaryOperation op) {
+    switch (op) {
+        case BINARY_ADD:
+            fprintf(file, "+");
+            break;
+        case BINARY_SUBTRACT:
+            fprintf(file, "-");
+            break;
+        case BINARY_MULTIPLY:
+            fprintf(file, "*");
+            break;
+        case BINARY_DIVIDE:
+            fprintf(file, "/");
+            break;
+        case BINARY_SHIFT_LEFT:
+            fprintf(file, "<<");
+            break;
+        case BINARY_SHIFT_RIGHT:
+            fprintf(file, ">>");
+            break;
+        case BINARY_LOGICAL_OR:
+            fprintf(file, "||");
+            break;
+        case BINARY_LOGICAL_AND:
+            fprintf(file, "&&");
+            break;
+        case BINARY_EQUAL:
+            fprintf(file, "==");
+            break;
+        case BINARY_NOT_EQUAL:
+            fprintf(file, "!=");
+            break;
+        case BINARY_LESS:
+            fprintf(file, "<");
+            break;
+        case BINARY_LESS_EQUAL:
+            fprintf(file, "<=");
+            break;
+        case BINARY_GREATER:
+            fprintf(file, ">");
+            break;
+        case BINARY_GREATER_EQUAL:
+            fprintf(file, ">=");
+            break;
+        case BINARY_NONE:
+            fprintf(file, "INVALID_BINARY_OPERATOR");
+            break;
+    }
+}
 
-void exprPrint(FILE* file, Expression* expr) {
+static void printUnaryOperator(FILE* file, UnaryOperation op) {
+    switch (op) {
+        case UNARY_NEGATE:
+            fprintf(file, "-");
+            break;
+        case UNARY_NOT:
+            fprintf(file, "!");
+            break;
+        case UNARY_ADDRESSOF:
+            fprintf(file, "&");
+            break;
+        case UNARY_DEREFERENCE:
+            fprintf(file, "*");
+            break;
+    }
+}
+
+void exprPrint(FILE* file, const Expression* expr) {
     if (expr == NULL) {
         fprintf(file, "Null");
         return;
@@ -62,14 +282,18 @@ void exprPrint(FILE* file, Expression* expr) {
             fprintf(file, "%d", expr->literal);
             break;
         case EXPR_UNARY:
-            fprintf(file, "(%c ", expr->unary.operation);
+            fprintf(file, "(");
+            printUnaryOperator(file, expr->unary.operation);
+            fprintf(file, " ");
             exprPrint(file, expr->unary.inner);
             fprintf(file, ")");
             break;
         case EXPR_BINARY:
             fprintf(file, "(");
             exprPrint(file, expr->binary.left);
-            fprintf(file, " %c ", expr->binary.operation);
+            fprintf(file, " ");
+            printBinaryOperator(file, expr->binary.operation);
+            fprintf(file, " ");
             exprPrint(file, expr->binary.right);
             fprintf(file, ")");
             break;
@@ -90,10 +314,24 @@ void exprPrint(FILE* file, Expression* expr) {
             exprPrint(file, expr->binary.right);
             fprintf(file, ")");
             break;
+        case EXPR_LABEL:
+            fprintf(file, "_Label_%d", expr->label);
+            break;
+        case EXPR_STACKOFFSET:
+            fprintf(file, "(_Stack + %d)", expr->stackOffset);
+            break;
     }
 }
 
-bool exprEquals(Expression* expr0, Expression* expr1) {
+bool isLiteral(const Expression* expr) {
+    return expr->type == EXPR_LITERAL;
+}
+
+bool isStackOffset(const Expression* expr) {
+    return expr->type == EXPR_STACKOFFSET;
+}
+
+bool exprEquals(const Expression* expr0, const Expression* expr1) {
     if (expr0->type != expr1->type) {
         return false;
     }
@@ -116,6 +354,10 @@ bool exprEquals(Expression* expr0, Expression* expr1) {
             return expr0->binary.operation == expr1->binary.operation
                 && exprEquals(expr0->binary.left, expr1->binary.left)
                 && exprEquals(expr0->binary.right, expr1->binary.right);
+        case EXPR_LABEL:
+            return expr0->label == expr1->label;
+        case EXPR_STACKOFFSET:
+            return expr0->stackOffset == expr1->stackOffset;
     }
 }
 

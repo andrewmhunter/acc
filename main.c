@@ -1,12 +1,9 @@
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 #include "scanner.h"
 #include "compiler.h"
 #include "parser.h"
 #include "mem.h"
-
-#include "diag.h"
 
 int main(int argc, char** argv) {
     if (argc < 2) {
@@ -39,7 +36,7 @@ int main(int argc, char** argv) {
         return 2;
     }
 
-    stmtPrint(stdout, stmt, 0);
+    stmtPrint(stdout, stmt, 0, false);
 
     Compiler compiler = compilerNew(&staticLifetime);
     compileFunction(&compiler, stmt);
