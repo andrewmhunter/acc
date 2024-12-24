@@ -7,20 +7,20 @@
 #define HASH_PRIME 0x00000100000001b3
 
 
-void hashBytes(Hash* hash, void* bytes, size_t count) {
-    char* chars = bytes;
+void hashBytes(Hash* hash, const void* bytes, size_t count) {
+    const char* chars = bytes;
     for (size_t i = 0; i < count; ++i) {
 	    *hash ^= chars[i];
         *hash *= HASH_PRIME;
     }
 }
 
-void hashBytesSized(Hash* hash, void* bytes, size_t count) {
+void hashBytesSized(Hash* hash, const void* bytes, size_t count) {
     hashBytes(hash, &count, sizeof(count));
     hashBytes(hash, bytes, count);
 }
 
-void hashString(Hash* hash, char* string) {
+void hashString(Hash* hash, const char* string) {
     hashBytesSized(hash, string, strlen(string));
 }
 
@@ -35,7 +35,7 @@ Set setNew(HashFn hashFn, EqualsFn equalsFn) {
     };
 }
 
-static Entry* setGetEntryHashed(Set* set, void* key, Hash hash) {
+static Entry* setGetEntryHashed(Set* set, const void* key, Hash hash) {
     size_t index = hash % set->capacity;
     while (set->entries[index].data != NULL) {
         if (
@@ -50,17 +50,17 @@ static Entry* setGetEntryHashed(Set* set, void* key, Hash hash) {
     return &set->entries[index];
 }
 
-Entry* setGetEntry(Set* set, void* key) {
+Entry* setGetEntry(Set* set, const void* key) {
     Hash hash = HASH_OFFSET;
     set->hashFn(&hash, key);
     return setGetEntryHashed(set, key, hash);
 }
 
-bool setHas(Set* set, void* key) {
+bool setHas(Set* set, const void* key) {
     return setGetEntry(set, key)->data != NULL;
 }
 
-void* setGet(Set* set, void* key) {
+void* setGet(Set* set, const void* key) {
     return setGetEntry(set, key)->data;
 }
 

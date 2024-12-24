@@ -4,6 +4,16 @@
 #include "mem.h"
 #include "diag.h"
 
+#define INTEGER(SIGN, SIZE) \
+    ((Type) {.tag = TYPE_INTEGER, .integer = {.size = (SIZE), .sign = (SIGN)}})
+
+const Type typeInt = INTEGER(SIGN_SIGNED, SIZE_INT);
+const Type typeUInt = INTEGER(SIGN_UNSIGNED, SIZE_INT);
+const Type typeAnyInt = INTEGER(SIGN_EITHER, SIZE_ANY);
+const Type typeChar = INTEGER(SIGN_SIGNED, SIZE_BYTE);
+const Type typeUChar = INTEGER(SIGN_UNSIGNED, SIZE_BYTE);
+const Type typeVoid = (Type){.tag = TYPE_VOID};
+
 Type* typeNew(Arena* arena, TypeTag tag) {
     Type* type = ARENA_ALLOC(arena, Type);
     type->tag = tag;
@@ -23,15 +33,15 @@ const Type* typePointer(Arena* arena, const Type* inner) {
     return type;
 }
 
-const Type* typeVoid() {
-    static Type inner = (Type) {.tag = TYPE_VOID};
-    return &inner;
-}
-
-const Type* typeUChar() {
-    static Type inner = (Type) {.tag = TYPE_INTEGER, .integer = {.size = SIZE_BYTE, .sign = SIGN_UNSIGNED}};
-    return &inner;
-}
+//const Type* typeVoid() {
+//    static Type inner = (Type) {.tag = TYPE_VOID};
+//    return &inner;
+//}
+//
+//const Type* typeUChar() {
+//    static Type inner = (Type) {.tag = TYPE_INTEGER, .integer = {.size = SIZE_BYTE, .sign = SIGN_UNSIGNED}};
+//    return &inner;
+//}
 
 const Type* typeAnyInteger() {
     static Type inner = (Type) {.tag = TYPE_INTEGER, .integer = {.size = SIZE_ANY, .sign = SIGN_EITHER}};
@@ -123,6 +133,28 @@ bool typeCompatible(const Type* t0, const Type* t1) {
     }
 }
 
+bool typeConvertable(const Type* from, const Type* into) {
+    if ((typeSize(from) == typeSize(into)
+                || from->integer.size == SIZE_ANY
+                || into->integer.size == SIZE_ANY
+            )
+            && (isPointer(from) || isInteger(from))
+            && (isPointer(into) || isInteger(into))
+    ) {
+        return true;
+    }
+
+    if (into->tag == TYPE_VOID) {
+        return true;
+    }
+
+    return false;
+}
+
+bool isVoid(const Type* type) {
+    return type->tag == TYPE_VOID;
+}
+
 bool isInteger(const Type* type) {
     return type->tag == TYPE_INTEGER;
 }
@@ -131,7 +163,7 @@ bool isPointer(const Type* type) {
     return type->tag == TYPE_POINTER;
 }
 
-const Type* commonType(const Type* t0, const Type* t1) {
+const Type* integerPromotion(const Type* t0, const Type* t1) {
     ASSERT(isInteger(t0) && isInteger(t1), "can only find the common type of integers");
 
     // If the integers are the same size, sign precedence goes: either < signed < unsigned

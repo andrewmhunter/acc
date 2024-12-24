@@ -14,13 +14,29 @@ static const Expression* binaryLiteral(
         Arena* arena,
         BinaryOperation operation,
         const Expression* leftExpr,
-        const Expression* rightExpr
+        const Expression* rightExpr,
+        Location location
 ) {
-    if (((isStackOffset(leftExpr) && isLiteral(rightExpr))
-        || (isStackOffset(rightExpr) && isLiteral(leftExpr)))
+    if ((isStackOffset(leftExpr) && isLiteral(rightExpr))
         && (operation == BINARY_ADD)
     ) {
-        return exprStackOffset(arena, leftExpr->literal + rightExpr->literal);
+        return exprStackOffset(
+                arena,
+                leftExpr->stackOffset.functionName,
+                leftExpr->stackOffset.offset + rightExpr->literal,
+                location
+            );
+    }
+
+    if ((isStackOffset(rightExpr) && isLiteral(leftExpr))
+        && (operation == BINARY_ADD)
+    ) {
+        return exprStackOffset(
+                arena,
+                rightExpr->stackOffset.functionName,
+                rightExpr->stackOffset.offset + leftExpr->literal,
+                location
+            );
     }
 
     if (!isLiteral(leftExpr) || !isLiteral(rightExpr)) {
@@ -66,7 +82,7 @@ static const Expression* binaryLiteral(
             UNREACHABLE();
     }
 
-    return exprLiteral(arena, result);
+    return exprLiteral(arena, result, location);
 }
 
 const Expression* exprBinary(
@@ -75,7 +91,7 @@ const Expression* exprBinary(
         const Expression* left,
         const Expression* right
 ) {
-    const Expression* exprlit = binaryLiteral(arena, operation, left, right);
+    const Expression* exprlit = binaryLiteral(arena, operation, left, right, locSpan(exprLoc(left), exprLoc(right)));
     if (exprlit != NULL) {
         return exprlit;
     }
@@ -103,7 +119,8 @@ const Expression* exprAssign(
 const Expression* unaryLiteral(
         Arena* arena,
         UnaryOperation operation,
-        const Expression* innerExpr
+        const Expression* innerExpr,
+        Location location
 ) {
     if (!isLiteral(innerExpr)) {
         return NULL;
@@ -123,15 +140,16 @@ const Expression* unaryLiteral(
             break;
     }
 
-    return exprLiteral(arena, result);
+    return exprLiteral(arena, result, location);
 }
 
 const Expression* exprUnary(
         Arena* arena,
         UnaryOperation operation,
-        const Expression* inner
+        const Expression* inner,
+        Location location
 ) {
-    const Expression* litexpr = unaryLiteral(arena, operation, inner);
+    const Expression* litexpr = unaryLiteral(arena, operation, inner, location);
     if (litexpr != NULL) {
         return litexpr;
     }
@@ -139,16 +157,17 @@ const Expression* exprUnary(
     Expression* expr = exprNew(arena, EXPR_UNARY);
     expr->unary.operation = operation;
     expr->unary.inner = inner;
+    expr->location = location;
     return expr;
 }
 
-#define LITERAL_INTERN_MIN -16
+/*#define LITERAL_INTERN_MIN -16
 #define LITERAL_INTERN_MAX 32
 
-static Expression internedLiterals[LITERAL_INTERN_MAX - LITERAL_INTERN_MIN + 1] = {};
+static Expression internedLiterals[LITERAL_INTERN_MAX - LITERAL_INTERN_MIN + 1] = {};*/
 
-const Expression* exprLiteral(Arena* arena, int value) {
-    if (value >= LITERAL_INTERN_MIN && value <= LITERAL_INTERN_MAX) {
+const Expression* exprLiteral(Arena* arena, int value, Location location) {
+    /*if (value >= LITERAL_INTERN_MIN && value <= LITERAL_INTERN_MAX) {
         size_t index = value - LITERAL_INTERN_MIN;
         if (internedLiterals[index].type == 0) {
             internedLiterals[index].type = EXPR_LITERAL;
@@ -156,52 +175,72 @@ const Expression* exprLiteral(Arena* arena, int value) {
         }
         //fprintf(stderr, "Got interned literal: %d\n", value);
         return &internedLiterals[index];
-    }
+    }*/
 
     //fprintf(stderr, "Allocated literal: %d\n", value);
 
     Expression* expr = exprNew(arena, EXPR_LITERAL);
     expr->literal = value;
+    expr->location = location;
     return expr;
 }
 
-const Expression* exprLabel(Arena* arena, int value) {
+const Expression* exprLabel(Arena* arena, int value, Location location) {
     Expression* expr = exprNew(arena, EXPR_LABEL);
     expr->label = value;
+    expr->location = location;
     return expr;
 }
 
-#define STACKOFFSET_INTERN_MAX 32
+//#define STACKOFFSET_INTERN_MAX 32
+//
+//static Expression stackOffsets[STACKOFFSET_INTERN_MAX + 1] = {};
 
-static Expression stackOffsets[STACKOFFSET_INTERN_MAX + 1] = {};
-
-const Expression* exprStackOffset(Arena* arena, int value) {
-    if (value >= 0 && value <= STACKOFFSET_INTERN_MAX) {
-        if (stackOffsets[value].type == 0) {
-            stackOffsets[value].type = EXPR_STACKOFFSET;
-            stackOffsets[value].stackOffset = value;
-        }
-        //fprintf(stderr, "Got interned stackOffset: %d\n", value);
-        return &stackOffsets[value];
-    }
+const Expression* exprStackOffset(Arena* arena, const Identifier* functionName, int offset, Location location) {
+    //if (value >= 0 && value <= STACKOFFSET_INTERN_MAX) {
+    //    if (stackOffsets[value].type == 0) {
+    //        stackOffsets[value].type = EXPR_STACKOFFSET;
+    //        stackOffsets[value].stackOffset = value;
+    //    }
+    //    //fprintf(stderr, "Got interned stackOffset: %d\n", value);
+    //    return &stackOffsets[value];
+    //}
 
     //fprintf(stderr, "Allocated stackoffset: %d\n", value);
 
     Expression* expr = exprNew(arena, EXPR_STACKOFFSET);
-    expr->stackOffset = value;
+    expr->stackOffset.functionName = functionName;
+    expr->stackOffset.offset = offset;
+    expr->location = location;
     return expr;
 }
 
-const Expression* exprCast(Arena* arena, const Type* type, const Expression* inner) {
+const Expression* exprCast(Arena* arena, const Type* type, const Expression* inner, Location location) {
     Expression* expr = exprNew(arena, EXPR_CAST);
     expr->cast.type = type;
     expr->cast.inner = inner;
+    expr->location = location;
     return expr;
 }
 
 const Expression* exprVariable(Arena* arena, Identifier name) {
     Expression* expr = exprNew(arena, EXPR_VARIABLE);
     expr->variable = name;
+    return expr;
+}
+
+const Expression* exprFunctionCall(
+        Arena* arena,
+        const Expression* name,
+        size_t argumentCount,
+        const Expression** arguments,
+        Position endPosition
+) {
+    Expression* expr = exprNew(arena, EXPR_CALL);
+    expr->call.name = name;
+    expr->call.argumentCount = argumentCount;
+    expr->call.arguments = arguments;
+    expr->call.endPosition = endPosition;
     return expr;
 }
 
@@ -305,7 +344,7 @@ void exprPrint(FILE* file, const Expression* expr) {
             fprintf(file, "))");
             break;
         case EXPR_VARIABLE:
-            identPrint(file, expr->variable);
+            identPrint(file, &expr->variable);
             break;
         case EXPR_ASSIGN:
             fprintf(file, "(");
@@ -318,8 +357,42 @@ void exprPrint(FILE* file, const Expression* expr) {
             fprintf(file, "_Label_%d", expr->label);
             break;
         case EXPR_STACKOFFSET:
-            fprintf(file, "(_Stack + %d)", expr->stackOffset);
+            fprintf(file, "(_Stack_%.*s + %d)",
+                    expr->stackOffset.functionName->length,
+                    expr->stackOffset.functionName->start,
+                    expr->stackOffset.offset
+                );
             break;
+        case EXPR_CALL:
+            exprPrint(file, expr->call.name);
+            fprintf(file, "(");
+            for (size_t i = 0; i < expr->call.argumentCount; ++i) {
+                exprPrint(file, expr->call.arguments[i]);
+                if (i != expr->call.argumentCount - 1) {
+                    fprintf(file, ", ");
+                }
+            }
+            fprintf(file, ")");
+            break;
+    }
+}
+
+bool isPure(const Expression* expr) {
+    switch (expr->type) {
+        case EXPR_LITERAL:
+        case EXPR_STACKOFFSET:
+        case EXPR_VARIABLE:
+        case EXPR_LABEL:
+            return true;
+        case EXPR_CALL:
+        case EXPR_ASSIGN:
+            return false;
+        case EXPR_BINARY:
+            return isPure(expr->binary.left) && isPure(expr->binary.right);
+        case EXPR_UNARY:
+            return isPure(expr->unary.inner);
+        case EXPR_CAST:
+            return isPure(expr->cast.inner);
     }
 }
 
@@ -349,7 +422,7 @@ bool exprEquals(const Expression* expr0, const Expression* expr1) {
             return typeEquals(expr0->cast.type, expr1->cast.type)
                 && exprEquals(expr0->cast.inner, expr1->cast.inner);
         case EXPR_VARIABLE:
-            return identEquals(expr0->variable, expr1->variable);
+            return identEquals(&expr0->variable, &expr1->variable);
         case EXPR_ASSIGN:
             return expr0->binary.operation == expr1->binary.operation
                 && exprEquals(expr0->binary.left, expr1->binary.left)
@@ -357,7 +430,34 @@ bool exprEquals(const Expression* expr0, const Expression* expr1) {
         case EXPR_LABEL:
             return expr0->label == expr1->label;
         case EXPR_STACKOFFSET:
-            return expr0->stackOffset == expr1->stackOffset;
+            return expr0->stackOffset.offset == expr1->stackOffset.offset
+                && identEquals(expr0->stackOffset.functionName, expr1->stackOffset.functionName);
+        case EXPR_CALL:
+            // TODO: implement
+            return false;
     }
+}
+
+static Location exprUnaryLoc(const Expression* inner, Position outerPosition) {
+    return locSpanPosition(exprLoc(inner), outerPosition);
+}
+
+Location exprLoc(const Expression* expr) {
+    switch (expr->type) {
+        case EXPR_VARIABLE:
+            return identLoc(&expr->variable);
+        case EXPR_ASSIGN:
+        case EXPR_BINARY:
+            return locSpan(exprLoc(expr->binary.left), exprLoc(expr->binary.right));
+        case EXPR_CALL:
+            return locSpanPosition(exprLoc(expr->call.name), expr->call.endPosition);
+        case EXPR_CAST:
+        case EXPR_UNARY:
+        case EXPR_LITERAL:
+        case EXPR_LABEL:
+        case EXPR_STACKOFFSET:
+            return expr->location;
+    }
+    return NO_LOCATION;
 }
 

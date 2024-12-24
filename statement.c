@@ -3,9 +3,10 @@
 #include "statement.h"
 #include "mem.h"
 
-Statement* stmtNew(StatementType type) {
+Statement* stmtNew(StatementType type, Location location) {
     Statement* stmt = malloc(sizeof(Statement));
     stmt->type = type;
+    stmt->location = location;
     return stmt;
 }
 
@@ -15,6 +16,7 @@ void stmtFree(Statement* stmt) {
     }
 
     switch (stmt->type) {
+        case STATEMENT_RETURN:
         case STATEMENT_EXPRESSION:
             break;
         case STATEMENT_IF:
@@ -39,12 +41,20 @@ static void printIndent(FILE* file, int depth) {
     }
 }
 
-void stmtPrint(FILE* file, Statement* stmt, int depth, bool firstLine) {
+void stmtPrint(FILE* file, const Statement* stmt, int depth, bool firstLine) {
     printIndent(file, depth);
     depth += 1;
     switch (stmt->type) {
         case STATEMENT_EXPRESSION:
             exprPrint(file, stmt->expression);
+            fprintf(file, ";");
+            break;
+        case STATEMENT_RETURN:
+            fprintf(file, "return");
+            if (stmt->expression != NULL) {
+                fprintf(file, " ");
+                exprPrint(file, stmt->expression);
+            }
             fprintf(file, ";");
             break;
         case STATEMENT_IF:
@@ -90,7 +100,7 @@ void stmtPrint(FILE* file, Statement* stmt, int depth, bool firstLine) {
         case STATEMENT_VARIABLE:
             typePrint(file, stmt->variableDeclaration.type);
             fprintf(file, " ");
-            identPrint(file, stmt->variableDeclaration.id);
+            identPrint(file, &stmt->variableDeclaration.id);
             if (stmt->variableDeclaration.expr != NULL) {
                 fprintf(file, " = ");
                 exprPrint(file, stmt->variableDeclaration.expr);
@@ -123,4 +133,66 @@ void stmtListAppend(StatementList* list, Statement* stmt) {
             stmt
         );
 }
+
+Location stmtLoc(const Statement* stmt) {
+    return stmt->location;
+}
+
+
+Program programNew() {
+    return (Program) {
+        .declarations = NULL,
+        .delarationsCount = 0,
+        .delarationsCapacity = 0,
+    };
+}
+
+void programPushDeclaration(Program* program, Declaration* declaration) {
+    APPEND_ARRAY(
+            NULL,
+            program->declarations,
+            Declaration*,
+            program->delarationsCapacity,
+            program->delarationsCount,
+            declaration
+        );
+}
+
+Declaration* functionDeclarationNew(
+        Arena* arena,
+        const Type* returnType,
+        Identifier name,
+        const Statement* body,
+        size_t arity,
+        Parameter* parameters,
+        Location location
+) {
+    Declaration* declaration = ARENA_ALLOC(arena, Declaration);
+    *declaration = (Declaration) {
+        .kind = DECL_FUNCTION,
+        .function = (FunctionDeclaration) {
+            .returnType = returnType,
+            .name = name,
+            .location = location,
+            .body = body,
+            .arity = arity,
+            .parameters = parameters,
+        }
+    };
+    return declaration;
+}
+
+Declaration* variableDeclarationNew(Arena* arena, const Type* type, Identifier name, Location location) {
+    Declaration* declaration = ARENA_ALLOC(arena, Declaration);
+    *declaration = (Declaration) {
+        .kind = DECL_VARIABLE,
+        .variable = (VariableDeclaration) {
+            .type = type,
+            .name = name,
+            .location = location,
+        }
+    };
+    return declaration;
+}
+
 

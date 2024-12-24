@@ -5,20 +5,22 @@
 #include "expression.h"
 #include "statement.h"
 #include "mem.h"
+#include "diag.h"
 
 typedef struct {
+    Arena* staticLifetime;
+    Diagnostics* diag;
     Scanner scan;
     Token peekToken;
     bool hasPeekToken;
-    bool hadError;
     bool recoveringError;
-    Arena* staticLifetime;
-    //Arena* compileLifetime;
 } Parser;
 
-Parser newParser(Arena* staticLifetime, Scanner scan);
+Parser newParser(Arena* staticLifetime, Diagnostics* diag, Scanner scan);
 const Expression* expression(Parser* parser);
 Statement* statement(Parser* parser);
+
+Program parseProgram(Parser* parser);
 
 #endif
 

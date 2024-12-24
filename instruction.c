@@ -1,5 +1,6 @@
 #include "instruction.h"
 #include "util.h"
+#include "diag.h"
 #include <assert.h>
 
 // Initalization
@@ -15,10 +16,10 @@ static Value indexValue(Arena* arena, Value value, int index) {
     const Expression* oldExpr = value.expression;
     switch (value.kind) {
         case VALUE_DIRECT:
-            value.expression = exprBinary(arena, BINARY_ADD, oldExpr, exprLiteral(arena, index));
+            value.expression = exprBinary(arena, BINARY_ADD, oldExpr, exprLiteral(arena, index, NO_LOCATION));
             break;
         case VALUE_IMMEDIATE:
-            value.expression = exprBinary(arena, BINARY_SHIFT_RIGHT, oldExpr, exprLiteral(arena, index * 8));
+            value.expression = exprBinary(arena, BINARY_SHIFT_RIGHT, oldExpr, exprLiteral(arena, index * 8, NO_LOCATION));
             break;
         default:
             break;
@@ -28,6 +29,36 @@ static Value indexValue(Arena* arena, Value value, int index) {
 
 Target targetValue(Value value) {
     return (Target) {.kind = TARGET_VALUE, .value = value};
+}
+
+Target targetType(const Type* type) {
+    return (Target) {.kind = TARGET_TYPE, .type = type};
+}
+
+const Type* getTargetType(const Target* target) {
+    if (target->kind == TARGET_VALUE) {
+        return target->value.type;
+    }
+    if (target->kind == TARGET_TYPE) {
+        return target->type;
+    }
+    return NULL;
+}
+
+const Type* getTargetTypeOr(const Target* target, const Type* type) {
+    const Type* ttype = getTargetType(target);
+    if (ttype != NULL) {
+        return ttype;
+    }
+    return type;
+}
+
+const Type* commonType(const Type* t0, const Type* t1, const Target* target) {
+    const Type* ttype = getTargetType(target);
+    if (ttype != NULL) {
+        return ttype;
+    }
+    return integerPromotion(t0, t1);
 }
 
 ConditionTarget conditionTarget(Value label, Invert invert) {
@@ -52,12 +83,12 @@ Value valueImmediateExpr(const Type* type, const Expression* expr) {
     };
 }
 
-Value valueConstant(Arena* arena, const Type* type, int literal) {
-    return valueImmediateExpr(type, exprLiteral(arena, literal));
+Value valueConstant(Arena* arena, const Type* type, int literal, Location location) {
+    return valueImmediateExpr(type, exprLiteral(arena, literal, location));
 }
 
-Value valueStackOffset(Arena* arena, const Type* type, int offset) {
-    return valueDirectExpr(type, exprStackOffset(arena, offset));
+Value valueStackOffset(Arena* arena, const Type* type, const Identifier* functionName, int offset, Location location) {
+    return valueDirectExpr(type, exprStackOffset(arena, functionName, offset, location));
 }
 
 Value valueDirectExpr(const Type* type, const Expression* expr) {
@@ -68,18 +99,17 @@ Value valueDirectExpr(const Type* type, const Expression* expr) {
     };
 }
 
-Value valueDirectStack(const Type* type, size_t stackOffset) {
-    return (Value) {
-        .kind = VALUE_DIRECT,
-        .type = type,
-        .stackOffset = stackOffset
-    };
-}
-
 Value valueDiscard() {
     return (Value) {
         .kind = VALUE_DISCARD,
-        .type = typeVoid()
+        .type = &typeVoid
+    };
+}
+
+Value valueError() {
+    return (Value) {
+        .kind = VALUE_ERROR,
+        .type = &typeVoid
     };
 }
 
@@ -87,6 +117,10 @@ Value valueZero(const Type* type) {
     static Expression zeroExpression = {.type = EXPR_LITERAL, .literal = 0};
     Value value = valueImmediateExpr(type, &zeroExpression);
     return value;
+}
+
+bool isValueError(const Value* value) {
+    return value->kind == VALUE_ERROR;
 }
 
 bool isImmediate(const Value* value) {
@@ -115,6 +149,17 @@ bool valueEquals(const Value* value0, const Value* value1) {
         return false;
     }
     return exprEquals(value0->expression, value1->expression);
+}
+
+Location valueLoc(const Value* value) {
+    switch (value->kind) {
+        case VALUE_IMMEDIATE:
+        case VALUE_DIRECT:
+            return exprLoc(value->expression);
+        case VALUE_ERROR:
+        case VALUE_DISCARD:
+            return NO_LOCATION;
+    }
 }
 
 Instruction instruction2Value(
@@ -181,20 +226,17 @@ void printValue(FILE* file, const Value* value) {
     switch (value->kind) {
         case VALUE_IMMEDIATE:
             exprPrint(file, value->expression);
-            /*if (index > 0) {
-                fprintf(file, " >> %d", index * 8);
-            }*/
             break;
         case VALUE_DIRECT:
             fprintf(file, "[");
             exprPrint(file, value->expression);
-            /*if (index > 0) {
-                fprintf(file, " + %d", index);
-            }*/
             fprintf(file, "]");
             break;
-        default:
-            // TODO: Error
+        case VALUE_ERROR:
+            fprintf(file, "ERROR");
+            break;
+        case VALUE_DISCARD:
+            PANIC("cannot print discarded value");
             break;
     }
 }
@@ -240,6 +282,8 @@ void printOpcode(FILE* file, Opcode opcode) {
         [INS_SHL]  = "shl",
         [INS_ROL]  = "rol",
         [INS_RET]  = "ret",
+        [INS_OUT]  = "out",
+        [INS_CALL] = "call",
     };
 
     if ((unsigned)opcode > LENGTH_OF(arr) || arr[opcode] == NULL) {

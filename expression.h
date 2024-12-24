@@ -4,6 +4,8 @@
 #include "type.h"
 #include "identifier.h"
 #include "mem.h"
+#include "type.h"
+#include "diag.h"
 
 typedef int Label;
 
@@ -11,6 +13,7 @@ typedef enum {
     // Zero is implicitly an invalid expression
     EXPR_BINARY = 1,
     EXPR_UNARY,
+    EXPR_CALL,
     EXPR_LITERAL,
     EXPR_CAST,
     EXPR_VARIABLE,
@@ -52,35 +55,65 @@ typedef struct Expression {
             const struct Expression* left;
             const struct Expression* right;
         } binary;
+
         struct {
-            const struct Expression* inner;
-            UnaryOperation operation;
-        } unary;
+            const struct Expression* name;
+            const struct Expression** arguments;
+            size_t argumentCount;
+            Position endPosition;
+        } call;
+
         struct {
-            const Type* type;
-            const struct Expression* inner;
-        } cast;
+            const struct Expression* condition;
+            const struct Expression* onTrue;
+            const struct Expression* onFalse;
+        } ternary;
+
         Identifier variable;
-        int literal;
-        int stackOffset;
-        Label label;
+
+        struct {
+            Location location;
+            union {
+                struct {
+                    UnaryOperation operation;
+                    const struct Expression* inner;
+                } unary;
+
+                struct {
+                    const Type* type;
+                    const struct Expression* inner;
+                } cast;
+
+                struct {
+                    const Identifier* functionName;
+                    int offset;
+                } stackOffset;
+
+                int literal;
+                Label label;
+            };
+        };
     };
 } Expression;
 
 const Expression* exprBinary(Arena* arena, BinaryOperation operation, const Expression* left, const Expression* right);
 const Expression* exprAssign(Arena* arena, BinaryOperation operation, const Expression* left, const Expression* right);
-const Expression* exprUnary(Arena* arena, UnaryOperation operation, const Expression* inner);
-const Expression* exprLiteral(Arena* arena, int value);
-const Expression* exprCast(Arena* arena, const Type* type, const Expression* inner);
+const Expression* exprUnary(Arena* arena, UnaryOperation operation, const Expression* inner, Location location);
+const Expression* exprLiteral(Arena* arena, int value, Location location);
+const Expression* exprCast(Arena* arena, const Type* type, const Expression* inner, Location location);
 const Expression* exprVariable(Arena* arena, Identifier name);
-const Expression* exprLabel(Arena* arena, Label value);
-const Expression* exprStackOffset(Arena* arena, Label value);
+const Expression* exprLabel(Arena* arena, Label value, Location location);
+const Expression* exprStackOffset(Arena* arena, const Identifier* functionName, int offset, Location location);
+const Expression* exprFunctionCall(Arena* arena, const Expression* name, size_t argumentCount, const Expression** arguments, Position endPosition);
 
 void exprPrint(FILE* file, const Expression* expr);
 
+bool isPure(const Expression* expr);
 bool isLiteral(const Expression* expr);
 bool isStackOffset(const Expression* expr);
 bool exprEquals(const Expression* expr0, const Expression* expr1);
+
+Location exprLoc(const Expression* expr);
 
 #endif
 

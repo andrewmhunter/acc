@@ -9,10 +9,13 @@
 #include "identifier.h"
 #include "util.h"
 
-
-
-Parser newParser(Arena* staticLifetime, Scanner scan) {
-    Parser parser = {.scan = scan, .staticLifetime = staticLifetime, .hasPeekToken = false};
+Parser newParser(Arena* staticLifetime, Diagnostics* diag, Scanner scan) {
+    Parser parser = {
+        .scan = scan,
+        .staticLifetime = staticLifetime,
+        .diag = diag,
+        .hasPeekToken = false,
+    };
     return parser;
 }
 
@@ -51,14 +54,26 @@ static bool match(Parser* parser, TokenType kind, Token* tokenOut) {
     return false;
 }
 
+static Position tokenEnd(const Token* token) {
+    return token->start + token->length - 1;
+}
+
+static Location tokenLoc(const Token* token) {
+    return locNew(token->start, tokenEnd(token));
+}
+
 static void verror(Parser* parser, Token* token, const char* message, va_list args) {
-    parser->hadError = true;
+    if (parser->recoveringError) {
+        return;
+    }
+
     parser->recoveringError = true;
 
-    fprintf(stderr, "error: ");
+    errorStart(parser->diag, tokenLoc(token));
     if (token != NULL) {
         fprintf(stderr, "at '%.*s': ", token->length, token->start);
     }
+
     vfprintf(stderr, message, args);
     fprintf(stderr, "\n");
 }
@@ -98,17 +113,26 @@ static void recover(Parser* parser) {
     }
 }
 
-static void consume(Parser* parser, TokenType kind, const char* message) {
+static Location consume(Parser* parser, TokenType kind, const char* message) {
     if (nextIs(parser, kind)) {
-        next(parser);
-        return;
+        Token tok = next(parser);
+        return tokenLoc(&tok);
     }
     errorAtNext(parser, message);
+    return NO_LOCATION;
 }
 
 static Identifier makeIdentifier(Token token) {
     Identifier id = {.start = token.start, .length = token.length};
     return id;
+}
+
+static Identifier identifier(Parser* parser) {
+    if (nextIs(parser, TOK_IDENTIFIER)) {
+        return makeIdentifier(next(parser));
+    }
+    errorAtNext(parser, "expected identifier");
+    return BLANK_IDENTIFIER;
 }
 
 static bool nextIsType(Parser* parser) {
@@ -154,7 +178,7 @@ static const Type* type(Parser* parser) {
             type = typeNew(parser->staticLifetime, TYPE_VOID);
             break;
         default:
-            assert(false && "invalid type");
+            errorAtNext(parser, "expected type");
             break;
     }
 
@@ -163,9 +187,6 @@ static const Type* type(Parser* parser) {
     }
     return type;
 }
-
-//static Identifier identifier(Parser* parser) {
-//}
 
 static int integerLiteral(Parser* parser, Token token) {
     int value = 0;
@@ -215,7 +236,7 @@ static const Expression* primary(Parser* parser, bool parenthesized) {
         return expr;
     }
     if (match(parser, TOK_NUMBER, &tok)) {
-        return exprLiteral(parser->staticLifetime, integerLiteral(parser, tok));
+        return exprLiteral(parser->staticLifetime, integerLiteral(parser, tok), tokenLoc(&tok));
     }
     if (match(parser, TOK_IDENTIFIER, &tok)) {
         return exprVariable(parser->staticLifetime, makeIdentifier(tok));
@@ -224,27 +245,86 @@ static const Expression* primary(Parser* parser, bool parenthesized) {
     return NULL;
 }
 
+static const Expression* functionCall(Parser* parser, const Expression* functionName) {
+    size_t argumentCount = 0;
+    size_t argumentCapacity = 0;
+    const Expression** arguments = NULL;
+
+    const char* unclosedMessage = "expected ')' or expression";
+
+    while (!nextIs(parser, TOK_PAREN_RIGHT) && !nextIs(parser, TOK_EOF)) {
+        const Expression* argument = expression(parser);
+        APPEND_ARRAY(
+                parser->staticLifetime,
+                arguments,
+                const Expression*,
+                argumentCapacity,
+                argumentCount,
+                argument
+            );
+
+        if (!match(parser, TOK_COMMA, NULL)) {
+            unclosedMessage = "expected ')' or ','";
+            break;
+        }
+    }
+
+    Location closing = consume(parser, TOK_PAREN_RIGHT, unclosedMessage);
+    return exprFunctionCall(parser->staticLifetime, functionName, argumentCount, arguments, closing.end);
+}
+
 static const Expression* suffix(Parser* parser, bool parenthesized) {
-    return primary(parser, parenthesized);
+    const Expression* inner = primary(parser, parenthesized);
+    for (;;) {
+        if (match(parser, TOK_PAREN_LEFT, NULL)) {
+            inner = functionCall(parser, inner);
+        } else if (match(parser, TOK_SQUARE_LEFT, NULL)) {
+            const Expression* toAdd = expression(parser);
+            Location end = consume(parser, TOK_SQUARE_RIGHT, "expected ']'");
+            const Expression* addition = exprBinary(parser->staticLifetime, BINARY_ADD, inner, toAdd);
+            inner = exprUnary(parser->staticLifetime, UNARY_DEREFERENCE, addition, locSpan(exprLoc(inner), end));
+        } else {
+            break;
+        }
+    }
+    return inner;
 }
 
 static const Expression* prefix(Parser* parser) {
     UnaryOperation op;
-    if (match(parser, TOK_MINUS, NULL)) {
+    Token tok;
+    if (match(parser, TOK_MINUS, &tok)) {
         op = UNARY_NEGATE;
-    } else if (match(parser, TOK_BANG, NULL)) {
+    } else if (match(parser, TOK_BANG, &tok)) {
         op = UNARY_NOT;
-    } else if (match(parser, TOK_PAREN_LEFT, NULL)) {
+    } else if (match(parser, TOK_BIT_AND, &tok)) {
+        op = UNARY_ADDRESSOF;
+    } else if (match(parser, TOK_ASTERIX, &tok)) {
+        op = UNARY_DEREFERENCE;
+    } else if (match(parser, TOK_PAREN_LEFT, &tok)) {
         if (nextIsType(parser)) {
             const Type* ty = type(parser);
             consume(parser, TOK_PAREN_RIGHT, "expected ')'");
-            return exprCast(parser->staticLifetime, ty, prefix(parser));
+            const Expression* inner = prefix(parser);
+            return exprCast(
+                    parser->staticLifetime,
+                    ty,
+                    inner,
+                    locSpan(tokenLoc(&tok), exprLoc(inner))
+                );
         }
         return suffix(parser, true);
     } else {
         return suffix(parser, false);
     }
-    return exprUnary(parser->staticLifetime, op, prefix(parser));
+
+    const Expression* inner = prefix(parser);
+    return exprUnary(
+            parser->staticLifetime,
+            op,
+            inner,
+            locSpan(tokenLoc(&tok), exprLoc(inner))
+        );
 }
 
 static const Expression* product(Parser* parser) {
@@ -372,10 +452,10 @@ const Expression* expression(Parser* parser) {
     return assignment(parser);
 }
 
-static Statement* conditional(Parser* parser) {
+static Statement* conditional(Parser* parser, Location startLocation) {
     consume(parser, TOK_PAREN_LEFT, "expected '('");
     const Expression* condition = expression(parser);
-    consume(parser, TOK_PAREN_RIGHT, "expected ')'");
+    Location endLocation = consume(parser, TOK_PAREN_RIGHT, "expected ')'");
     Statement* inner = statement(parser);
 
     Statement* onElse = NULL;
@@ -383,28 +463,28 @@ static Statement* conditional(Parser* parser) {
         onElse = statement(parser);
     }
 
-    Statement* stmt = stmtNew(STATEMENT_IF);
+    Statement* stmt = stmtNew(STATEMENT_IF, locSpan(startLocation, endLocation));
     stmt->conditional.condition = condition;
     stmt->conditional.inner = inner;
     stmt->conditional.onElse = onElse;
     return stmt;
 }
 
-static Statement* whileLoop(Parser* parser) {
+static Statement* whileLoop(Parser* parser, Location startLoc) {
     consume(parser, TOK_PAREN_LEFT, "expected '('");
     const Expression* condition = expression(parser);
-    consume(parser, TOK_PAREN_RIGHT, "expected ')'");
+    Location endLoc = consume(parser, TOK_PAREN_RIGHT, "expected ')'");
     Statement* inner = statement(parser);
 
-    Statement* stmt = stmtNew(STATEMENT_WHILE);
+    Statement* stmt = stmtNew(STATEMENT_WHILE, locSpan(startLoc, endLoc));
     stmt->whileLoop.condition = condition;
     stmt->whileLoop.inner = inner;
     stmt->whileLoop.isDoWhile = false;
     return stmt;
 }
 
-static Statement* variableDeclaration(Parser* parser) {
-    Statement* stmt = stmtNew(STATEMENT_VARIABLE);
+static Statement* variableDeclaration(Parser* parser, Location identLocation) {
+    Statement* stmt = stmtNew(STATEMENT_VARIABLE, identLocation);
     stmt->variableDeclaration.type = type(parser);
 
     if (!nextIs(parser, TOK_IDENTIFIER)) {
@@ -418,41 +498,131 @@ static Statement* variableDeclaration(Parser* parser) {
         stmt->variableDeclaration.expr = expression(parser);
     }
 
-    consume(parser, TOK_SEMICOLON, "expected ';' after declaration");
+    Location semiLocation = consume(parser, TOK_SEMICOLON, "expected ';' after declaration");
+    stmt->location = locSpan(stmt->location, semiLocation);
     return stmt;
 }
 
 static Statement* expressionStatement(Parser* parser) {
     const Expression* expr = expression(parser);
-    Statement* stmt = stmtNew(STATEMENT_EXPRESSION);
-    consume(parser, TOK_SEMICOLON, "expected ';'");
+    Statement* stmt = stmtNew(STATEMENT_EXPRESSION, exprLoc(expr));
+    Location semiLocation = consume(parser, TOK_SEMICOLON, "expected ';'");
     stmt->expression = expr;
+    stmt->location = locSpan(stmt->location, semiLocation);
     return stmt;
 }
 
-static Statement* block(Parser* parser) {
+static Statement* block(Parser* parser, Location startLocation) {
+    Token tok = tokenNull();
     StatementList list = stmtListNew();
-    while (!match(parser, TOK_BRACE_RIGHT, NULL) && !nextIs(parser, TOK_EOF)) {
+    while (!match(parser, TOK_BRACE_RIGHT, &tok) && !nextIs(parser, TOK_EOF)) {
         Statement* inner = statement(parser);
         stmtListAppend(&list, inner);
         recover(parser);
     }
 
-    Statement* stmt = stmtNew(STATEMENT_BLOCK);
+    Statement* stmt = stmtNew(STATEMENT_BLOCK, locSpan(startLocation, tokenLoc(&tok)));
     stmt->block = list;
     return stmt;
 }
 
+static Statement* parseReturn(Parser* parser, Location startLocation) {
+    const Expression* expr = NULL;
+    if (!nextIs(parser, TOK_SEMICOLON)) {
+        expr = expression(parser);
+    }
+    Location endLocation = consume(parser, TOK_SEMICOLON, "expected ';'");
+
+    Statement* stmt = stmtNew(STATEMENT_RETURN, locSpan(startLocation, endLocation));
+    stmt->expression = expr;
+    return stmt;
+}
+
 Statement* statement(Parser* parser) {
+    Location startLocation = tokenLoc(peek(parser));
+
     if (nextIsType(parser)) {
-        return variableDeclaration(parser);
+        return variableDeclaration(parser, startLocation);
     } else if (match(parser, TOK_IF, NULL)) {
-        return conditional(parser);
+        return conditional(parser, startLocation);
     } else if (match(parser, TOK_WHILE, NULL)) {
-        return whileLoop(parser);
+        return whileLoop(parser, startLocation);
     } else if (match(parser, TOK_BRACE_LEFT, NULL)) {
-        return block(parser);
+        return block(parser, startLocation);
+    } else if (match(parser, TOK_RETURN, NULL)) {
+        return parseReturn(parser, startLocation);
     }
     return expressionStatement(parser);
+}
+
+Declaration* parseDeclaration(Parser* parser) {
+    Location startLoc = tokenLoc(peek(parser));
+    const Type* ty = type(parser);
+    Identifier name = identifier(parser);
+
+    if (match(parser, TOK_SEMICOLON, NULL)) {
+        return variableDeclarationNew(
+                parser->staticLifetime,
+                ty,
+                name,
+                locSpan(startLoc, identLoc(&name))
+            );
+    }
+
+    consume(parser, TOK_PAREN_LEFT, "expected '(' or ';'");
+    const char* unclosedMessage = "expected ')' or type";
+
+    Parameter* parameters = NULL;
+    size_t parameterCapacity = 0;
+    size_t parameterCount = 0;
+    while (!nextIs(parser, TOK_PAREN_RIGHT) && !nextIs(parser, TOK_EOF)) {
+        const Type* paramType = type(parser);
+        Identifier paramName = identifier(parser);
+        Parameter param = (Parameter) {.type = paramType, .name = paramName};
+
+        APPEND_ARRAY(
+                parser->staticLifetime,
+                parameters,
+                Parameter,
+                parameterCapacity,
+                parameterCount,
+                param
+            );
+
+        if (!match(parser, TOK_COMMA, NULL)) {
+            unclosedMessage = "expected ')' or ','";
+            break;
+        }
+    }
+    Location endLoc = consume(parser, TOK_PAREN_RIGHT, unclosedMessage);
+
+    Statement* body = NULL;
+    Token tok = tokenNull();
+    if (match(parser, TOK_BRACE_LEFT, &tok)) {
+        body = block(parser, tokenLoc(&tok));
+    } else {
+        consume(parser, TOK_SEMICOLON, "expected ';'");
+    }
+
+    return functionDeclarationNew(
+            parser->staticLifetime,
+            ty,
+            name,
+            body,
+            parameterCount,
+            parameters,
+            locSpan(startLoc, endLoc)
+        );
+}
+
+Program parseProgram(Parser* parser) {
+    Program progam = programNew();
+
+    while (!nextIs(parser, TOK_EOF) && !parser->recoveringError) {
+        Declaration* decl = parseDeclaration(parser);
+        programPushDeclaration(&progam, decl);
+    }
+
+    return progam;
 }
 

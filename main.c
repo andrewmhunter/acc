@@ -4,17 +4,30 @@
 #include "compiler.h"
 #include "parser.h"
 #include "mem.h"
+#include "compile_statement.h"
+#include "diag.h"
 
-int main(int argc, char** argv) {
-    if (argc < 2) {
-        fprintf(stderr, "missing file name\n");
-        return 1;
-    }
+char* loadStdin() {
+    const int chunkSize = 512;
+    char* text = NULL;
+    size_t bytesRead = 0;
+    size_t size = 0;
+    do {
+        text = realloc(text, size + chunkSize);
+        bytesRead = fread(text, 1, chunkSize, stdin);
+        size += bytesRead;
 
-    FILE* file = fopen(argv[1], "r");
+    } while(bytesRead == chunkSize);
+
+    text[size] = '\0';
+    return text;
+}
+
+char* loadFile(const char* fileName) {
+    FILE* file = fopen(fileName, "r");
     if (!file) {
         perror("Error");
-        exit(1);
+        return NULL;
     }
 
     fseek(file, 0, SEEK_END);
@@ -25,26 +38,49 @@ int main(int argc, char** argv) {
     text[fileSize] = '\0';
     fclose(file);
 
+    return text;
+}
+
+int main(int argc, char** argv) {
+    char* text = NULL;
+    switch (argc) {
+        case 1:
+            text = loadStdin();
+            break;
+        case 2:
+            text = loadFile(argv[1]);
+            break;
+        default:
+            fprintf(stderr, "incorrect command line arguments\n");
+            return 1;
+    }
+
+    if (text == NULL) {
+        return 1;
+    }
+
     Arena staticLifetime = arenaNew();
+    Diagnostics diag = newDiagnostics(text);
 
     Scanner scan = newScanner(text);
-    Parser parser = newParser(&staticLifetime, scan);
+    Parser parser = newParser(&staticLifetime, &diag, scan);
 
-    Statement* stmt = statement(&parser);
+    Program program = parseProgram(&parser);
 
-    if (parser.hadError) {
+    if (diag.errorCount != 0) {
         return 2;
     }
 
-    stmtPrint(stdout, stmt, 0, false);
-
-    Compiler compiler = compilerNew(&staticLifetime);
-    compileFunction(&compiler, stmt);
-
-    stmtFree(stmt);
+    Compiler compiler = compilerNew(&staticLifetime, &diag, program.declarations);
+    compileProgram(&compiler, &program);
 
     arenaFree(&staticLifetime);
     free(text);
+
+    if (diag.errorCount != 0) {
+        return 3;
+    }
     return 0;
 }
+
 

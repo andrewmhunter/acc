@@ -6,6 +6,7 @@
 #include "condition.h"
 
 typedef enum {
+    VALUE_ERROR,
     VALUE_DISCARD,
     VALUE_IMMEDIATE,
     VALUE_DIRECT,
@@ -14,23 +15,22 @@ typedef enum {
 typedef struct Value {
     ValueType kind;
     const Type* type;
-    union {
-        const Expression* expression;
-        Label label;
-        size_t stackOffset;
-    };
+    const Expression* expression;
 } Value;
 
 typedef enum {
     TARGET_DISCARD,
     TARGET_VALUE,
     TARGET_ANY,
-    //TARGET_TYPE,
+    TARGET_TYPE,
 } TargetType;
 
 typedef struct {
     TargetType kind;
-    Value value;
+    union {
+        Value value;
+        const Type* type;
+    };
 } Target;
 
 #define DISCARD_TARGET ((Target) {.kind = TARGET_DISCARD})
@@ -88,6 +88,8 @@ typedef enum: char {
     INS_SHL,
     INS_ROL,
     INS_RET,
+    INS_OUT,
+    INS_CALL,
 } Opcode;
 
 typedef struct {
@@ -104,20 +106,29 @@ typedef struct {
 Address addressReg(Reg reg);
 
 Target targetValue(Value value);
+Target targetType(const Type* type);
+const Type* getTargetTypeOr(const Target* target, const Type* type);
+const Type* commonType(const Type* t0, const Type* t1, const Target* target);
 
 ConditionTarget conditionTarget(Value label, Invert invert);
 ConditionTarget invertConditionTarget(ConditionTarget target);
 
 Value valueImmediateExpr(const Type* type, const Expression* expr);
-Value valueConstant(Arena* arena, const Type* type, int literal);
-Value valueStackOffset(Arena* arena, const Type* type, int offset);
+Value valueConstant(Arena* arena, const Type* type, int literal, Location location);
+Value valueStackOffset(Arena* arena, const Type* type, const Identifier* functionName, int offset, Location location);
 Value valueDirectExpr(const Type* type, const Expression* expr);
 Value valueDiscard();
+Value valueError();
 Value valueZero(const Type* type);
 
+bool isValueError(const Value* value);
 bool isImmediate(const Value* value);
 bool isDirect(const Value* value);
 bool immediateResolved(const Value* value, int* output);
+
+bool valueEquals(const Value* value0, const Value* value1);
+
+Location valueLoc(const Value* value);
 
 Instruction instruction2Value(
         Arena* arena,
@@ -139,8 +150,6 @@ Instruction instruction1Value(
 Instruction instruction2(Opcode opcode, Address dest, Address src);
 Instruction instruction1(Opcode opcode, Address address);
 Instruction instruction0(Opcode opcode);
-
-bool valueEquals(const Value* value0, const Value* value1);
 
 // Printing
 

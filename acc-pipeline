@@ -1,0 +1,4 @@
+#!/bin/bash
+
+cat "$@" | cpp -D __SPDR__ -D __ACC__ -undef -nostdinc | ./acc
+

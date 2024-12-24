@@ -5,7 +5,7 @@ TARGET := acc
 
 SRCS := main.c scanner.c mem.c parser.c expression.c statement.c type.c \
 		identifier.c compiler.c hash.c instruction.c diag.c condition.c \
-		util.c
+		util.c compile_statement.c compile_expression.c compile_condition.c
 
 OBJS := $(SRCS:%.c=$(DIR)/%.o)
 
