@@ -1,4 +1,11 @@
 #!/bin/bash
 
-cat "$@" | cpp -D __SPDR__ -D __ACC__ -undef -nostdinc | ./acc
+ACC=acc
+
+if [ -x acc ]
+then
+    ACC=./acc
+fi
+
+cpp "$@" -D __SPDR__ -D __ACC__ -undef -nostdinc | "$ACC"
 

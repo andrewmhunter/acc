@@ -1,6 +1,10 @@
 #ifndef COMPILER_H
 #define COMPILER_H
 
+#define PRINT_DELETED
+#define EMIT_COMMENTS_STATEMENT
+//#define EMIT_COMMENTS_LOCATION
+
 #include <stdlib.h>
 #include "instruction.h"
 //#include "hash.h"
@@ -16,7 +20,7 @@ typedef struct {
 
 struct Compiler;
 
-typedef struct {
+typedef struct Function {
     struct Compiler* compiler;
     Arena* lifetime;
     Diagnostics* diag;
@@ -30,6 +34,7 @@ typedef struct {
     size_t currentStackSize;
     size_t maxStackSize;
     int scopeDepth;
+    struct Function* nextFunction;
 } Function;
 
 typedef struct {
@@ -41,13 +46,19 @@ typedef struct Compiler {
     Arena* lifetime;
     Diagnostics* diag;
     int label;
-    //Set globals;
     int globalCount;
     Declaration* const* globals;
 } Compiler;
 
 Compiler compilerNew(Arena* staticLifetime, Diagnostics* diag, Declaration* const* declarations);
-Function functionNew(Compiler* compiler, const FunctionDeclaration* decl);
+Function* functionNew(Arena* arena, Compiler* compiler, const FunctionDeclaration* decl);
+
+void printFunction(FILE* file, const Function* func);
+
+void emitComment(Function* func, const char* comment);
+void emitCommentf(Function* func, const char* format, ...);
+void emitCommentStatement(Function* func, const Statement* stmt);
+void emitCommentLocation(Function* func, Location loc);
 
 void emitImplied(Function* func, Opcode opcode);
 void emitReg(Function* func, Opcode opcode, Reg reg);

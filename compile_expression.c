@@ -16,8 +16,9 @@ static Value getValueTarget(Function* func, Target target, const Type* type) {
     switch (target.kind) {
         case TARGET_VALUE:
             return target.value;
-        case TARGET_ANY:
         case TARGET_TYPE:
+            return pushStackAnon(func, target.type, NO_LOCATION);
+        case TARGET_ANY:
             return pushStackAnon(func, type, NO_LOCATION);
         case TARGET_DISCARD:
             return valueDiscard();
@@ -36,22 +37,19 @@ static Value widenUnsignedInteger(
     ASSERT_ERROR(value.type->integer.sign != SIGN_SIGNED, func, valueLoc(&value),
             "must not be signed");
 
-    Value tvalue = getValueTarget(func, target, toType);
 
     int fromSize = typeSize(value.type);
     // TODO: this might be an error. check it.
     int toSize = typeSize(toType);
 
-    for (int i = 0; i < fromSize; ++i) {
-        load(func, REG_A, value, i);
-        store(func, tvalue, i, REG_A);
-    }
+    ValueList list = valueList(func->lifetime); 
+    valueListPush(&list, value, fromSize, 0);
 
-    load(func, REG_A, valueConstant(func->lifetime, &typeUChar, 0, NO_LOCATION), 0);
-    for (int i = fromSize; i < toSize; ++i) {
-        store(func, tvalue, i, REG_A);
-    }
-    return tvalue;
+    Value zero = valueConstant(func->lifetime, &typeUChar, 0, NO_LOCATION);
+    valueListPush(&list, zero, toSize - fromSize, 0);
+
+    Value widenedValue = valueMultipart(func->lifetime, toType, &list);
+    return moveValueToTarget(func, widenedValue, target);
 }
 
 static Value widenSignedInteger(
@@ -270,15 +268,14 @@ static Value performUncheckedBinary(
 
     Value tvalue = getValueTarget(func, target, lhs.type);
 
-    ASSERT(
-            typeSize(lhs.type) == typeSize(rhs.type) 
+    ASSERT(typeSize(lhs.type) == typeSize(rhs.type) 
                 && typeSize(tvalue.type) == typeSize(lhs.type),
             "all values must be the same size");
+
 
     load(func, REG_A, lhs, 0);
     emitRegValue(func, first, REG_A, rhs, 0);
     store(func, tvalue, 0, REG_A);
-
 
     int size = typeSize(lhs.type);
     for (int i = 1; i < size; ++i) {
@@ -382,7 +379,6 @@ static Value leftShiftByImmediate(
     if (shiftBy >= typeSize(tvalue.type) * 8) {
         return moveValueToValue(func, valueZero(tvalue.type), tvalue);
     }
-
 
     int size = typeSize(tvalue.type);
     for (int i = 0; i < shiftBy; ++i) {
@@ -621,7 +617,7 @@ static Value compileFunctionCall(
 
     const Declaration* decl = lookupGlobal(func->compiler, name);
 
-    ASSERT_ERROR(decl != NULL, func, exprLoc(nameExpr), "function does not exist");
+    ASSERT_ERROR(decl != NULL, func, exprLoc(nameExpr), "function '%.*s' does not exist", name.length, name.start);
     ASSERT_ERROR(decl->kind == DECL_FUNCTION, func, exprLoc(nameExpr),
             "can only call a function");
 

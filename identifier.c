@@ -11,6 +11,6 @@ void identPrint(FILE* file, const Identifier* id) {
 }
 
 Location identLoc(const Identifier* id) {
-    return locNew(id->start, id->start + id->length - 1);
+    return locNew(id->position, id->position + id->length - 1);
 }
 

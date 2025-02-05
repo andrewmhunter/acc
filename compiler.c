@@ -3,20 +3,12 @@
 #include "util.h"
 #include "diag.h"
 #include "condition.h"
+#include "match.h"
 #include <stdio.h>
 
 /// ############################################################################
 /// Initalizers
 /// ############################################################################
-
-//static void globalHash(Hash* hash, const void* global) {
-//    Global* g = (Global*)global;
-//    hashBytesSized(hash, g->name.start, g->name.length);
-//}
-//
-//static bool globalEquals(const void* left, const void* right) {
-//    return identEquals(((Global*)left)->name, ((Global*)right)->name);
-//}
 
 Compiler compilerNew(Arena* staticLifetime, Diagnostics* diag, Declaration* const* declarations) {
     return (Compiler) {
@@ -29,8 +21,9 @@ Compiler compilerNew(Arena* staticLifetime, Diagnostics* diag, Declaration* cons
     };
 }
 
-Function functionNew(Compiler* compiler, const FunctionDeclaration* decl) {
-    return (Function) {
+Function* functionNew(Arena* arena, Compiler* compiler, const FunctionDeclaration* decl) {
+    Function* func = ARENA_ALLOC(arena, Function);
+    *func = (Function) {
         .compiler = compiler,
         .lifetime = compiler->lifetime,
         .diag = compiler->diag,
@@ -44,7 +37,9 @@ Function functionNew(Compiler* compiler, const FunctionDeclaration* decl) {
         .currentStackSize = 0,
         .maxStackSize = 0,
         .scopeDepth = 0,
+        .nextFunction = NULL,
     };
+    return func;
 }
 
 /// ############################################################################
@@ -52,7 +47,7 @@ Function functionNew(Compiler* compiler, const FunctionDeclaration* decl) {
 /// ############################################################################
 
 static void appendInstruction(Function* func, Instruction instruction) {
-    printInstruction(stdout, &instruction);
+    //printInstruction(stdout, &instruction);
     APPEND_ARRAY(
         NULL,
         func->instructions,
@@ -61,6 +56,26 @@ static void appendInstruction(Function* func, Instruction instruction) {
         func->instructionsLength,
         instruction
     );
+}
+
+void emitComment(Function* func, const char* comment) {
+    appendInstruction(func, (Instruction) {.opcode = INS_COMMENT, .comment = {.string = comment}});
+}
+
+void emitCommentf(Function* func, const char* format, ...) {
+    va_list args;
+    va_start(args, format);
+    const char* comment = arenaVsprintf(func->lifetime, format, args);
+    va_end(args);
+    emitComment(func, comment);
+}
+
+void emitCommentStatement(Function* func, const Statement* stmt) {
+    appendInstruction(func, (Instruction) {.opcode = INS_COMMENT_STATEMENT, .comment = {.statement = stmt}});
+}
+
+void emitCommentLocation(Function* func, Location loc) {
+    appendInstruction(func, (Instruction) {.opcode = INS_COMMENT_LOCATION, .comment = {.location = loc}});
 }
 
 void emitImplied(Function* func, Opcode opcode) {
@@ -313,5 +328,31 @@ Value lookupSymbol(Function* func, Identifier ident) {
 
 Value getFuncReturnValue(Arena* arena, const FunctionDeclaration* decl, Location location) {
     return valueStackOffset(arena, decl->returnType, &decl->name, 0, location);
+}
+
+void printFunction(FILE* file, const Function* func) {
+    const FunctionDeclaration* decl = func->decl;
+
+    int insCount = 0;
+
+    fprintf(file, "%.*s:\n", decl->name.length, decl->name.start);
+    for (size_t i = 0; i < func->instructionsLength; ++i) {
+        const Instruction* ins = &func->instructions[i];
+
+#ifndef PRINT_DELETED
+        if (ins->opcode == INS_DELETED) {
+            continue;
+        }
+#endif
+
+        printInstruction(file, ins, func->diag);
+
+        if (!opcodeSkip(ins->opcode) && ins->opcode != INS_LABEL) {
+            insCount += 1;
+        }
+    }
+
+    fprintf(file, "variable _Stack_%.*s %lu\n", decl->name.length, decl->name.start, func->maxStackSize);
+    fprintf(file, "\n; Instruction count: %d\n\n", insCount);
 }
 

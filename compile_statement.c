@@ -4,6 +4,7 @@
 #include "diag.h"
 #include "compile_expression.h"
 #include "compile_condition.h"
+#include "optimizer.h"
 
 static void compileStatement(Function* func, const Statement* stmt);
 
@@ -85,11 +86,19 @@ static void compileReturn(Function* func, const Expression* expr, Location loc) 
 }
 
 static void compileStatement(Function* func, const Statement* stmt) {
-    fprintf(stdout, "; ");
-    stmtPrint(stdout, stmt, 0, true);
+#ifdef EMIT_COMMENTS_LOCATION
+    emitCommentLocation(func, stmtLoc(stmt));
+#endif
+#ifdef EMIT_COMMENTS_STATEMENT
+    emitCommentStatement(func, stmt);
+#endif
+
     switch (stmt->type) {
         case STATEMENT_BLOCK:
             compileBlock(func, stmt);
+#ifdef EMIT_COMMENTS_STATEMENT
+            emitComment(func, "}");
+#endif
             break;
         case STATEMENT_EXPRESSION:
             enterScope(func);
@@ -154,13 +163,13 @@ bool functionDeclMatchesExisting(Compiler* compiler, const FunctionDeclaration* 
     return true;
 }
 
-void compileFunction(Compiler* compiler, const FunctionDeclaration* decl) {
+Function* compileFunction(Compiler* compiler, const FunctionDeclaration* decl) {
     // Make sure this function declaration matches previous declarations of the function
     functionDeclMatchesExisting(compiler, decl);
     compiler->globalCount += 1;
 
     if (decl->body == NULL) {
-        return;
+        return NULL;
     }
 
     // Make sure that the function hasn't previously been defined
@@ -178,29 +187,28 @@ void compileFunction(Compiler* compiler, const FunctionDeclaration* decl) {
         }
     }
 
-    Function func = functionNew(compiler, decl);
+    Function* func = functionNew(compiler->lifetime, compiler, decl);
 
     // stmtPrint(stdout, decl->body, 0, false);
     
     if (!isVoid(decl->returnType)) {
-        pushStackAnon(&func, decl->returnType, NO_LOCATION);
+        pushStackAnon(func, decl->returnType, NO_LOCATION);
     }
 
     for (size_t i = 0; i < decl->arity; ++i) {
-        compileVariable(&func, decl->parameters[i].type, decl->parameters[i].name, NULL);
+        compileVariable(func, decl->parameters[i].type, decl->parameters[i].name, NULL);
     }
 
-    fprintf(stdout, "%.*s:\n", decl->name.length, decl->name.start);
-    compileStatement(&func, decl->body);
-    emitImplied(&func, INS_RET);
+    compileStatement(func, decl->body);
+    emitImplied(func, INS_RET);
 
-    //for (int i = 0; i < func.instructionsLength; ++i) {
-    //    printInstruction(stdout, &func.instructions[i]);
-    //}
-    fprintf(stdout, "variable _Stack_%.*s %lu\n", decl->name.length, decl->name.start, func.maxStackSize);
-    fprintf(stderr, "\n; Instruction count: %lu\n\n", func.instructionsLength);
+    optimizeFunction(func->lifetime, func, DEFAULT_OPTIMIZATION_LEVEL);
+
+    printFunction(stdout, func);
 
     //free(func.instructions);
+
+    return func;
 }
 
 void compileGlobalVariable(Compiler* compiler, const VariableDeclaration* decl) {
@@ -217,15 +225,24 @@ void compileGlobalVariable(Compiler* compiler, const VariableDeclaration* decl) 
 void compileProgram(Compiler* compiler, const Program* program) {
     fprintf(stdout, "    call main\n");
     fprintf(stdout, "    hlt\n");
+
+    Function* head = NULL;
+    Function** nextFunction = &head;
     
     for (size_t i = 0; i < program->delarationsCount; ++i) {
         const Declaration* decl = program->declarations[i];
 
-
         switch (decl->kind) {
             case DECL_FUNCTION:
-                compileFunction(compiler, &decl->function);
+            {
+                Function* func = compileFunction(compiler, &decl->function);
+                if (func == NULL) {
+                    break;
+                }
+                *nextFunction = func;
+                nextFunction = &func->nextFunction;
                 break;
+            }
             case DECL_VARIABLE:
                 compileGlobalVariable(compiler, &decl->variable);
                 break;
@@ -235,6 +252,7 @@ void compileProgram(Compiler* compiler, const Program* program) {
     fprintf(stdout,
         "out:\n"
         "    mov a, [_Stack_out + 0]\n"
+        "    out a\n"
         "    ret\n"
         "variable _Stack_out 1\n"
         //"include \"stdlib/multiply.spdr\"\n"

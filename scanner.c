@@ -4,7 +4,7 @@
 #include <ctype.h>
 
 Scanner newScanner(const char* text) {
-    Scanner scan = {.tokenStart = text, .tokenEnd = text};
+    Scanner scan = {.textStart = text, .tokenStart = text, .tokenEnd = text};
     return scan;
 }
 
@@ -13,6 +13,7 @@ static Token makeToken(Scanner* scan, TokenType kind) {
         .kind = kind,
         .start = scan->tokenStart,
         .length = scan->tokenEnd - scan->tokenStart,
+        .position = scan->tokenStart - scan->textStart,
     };
     scan->tokenStart = scan->tokenEnd;
     scan->tokenEnd = scan->tokenStart;
@@ -213,7 +214,7 @@ Token nextToken(Scanner* scan) {
     if (peek(scan) >= '0' && peek(scan) <= '9') {
         return integer(scan);
     }
-    if (isalpha(peek(scan)) || peek(scan) == '_') {
+    if (isalpha(peek(scan)) || peek(scan) == '_' || peek(scan) == '#') {
         return identifier(scan);
     }
 

@@ -27,3 +27,4 @@ bool conditionEqual(Condition condition0, Condition condition1) {
     return condition0.flag == condition1.flag
         && condition0.negate == condition1.negate;
 }
+

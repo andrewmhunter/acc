@@ -8,6 +8,7 @@
 typedef struct {
     const char* start;
     int length;
+    Position position;
 } Identifier;
 
 #define BLANK_IDENTIFIER ((Identifier) {.start = NULL, .length = 0})

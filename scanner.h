@@ -2,6 +2,7 @@
 #define SCANNER_H
 
 #include <stdbool.h>
+#include "diag.h"
 
 typedef enum {
     TOK_PRAGMA,
@@ -61,10 +62,11 @@ typedef struct {
     TokenType kind;
     int length;
     const char* start;
-    int line;
+    Position position;
 } Token;
 
 typedef struct {
+    const char* textStart;
     const char* tokenStart;
     const char* tokenEnd;
     bool hasPeek;

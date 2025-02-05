@@ -23,11 +23,11 @@ typedef enum {
 } ExpressionType;
 
 typedef enum {
+    BINARY_NONE,
     BINARY_ADD,
     BINARY_SUBTRACT,
     BINARY_MULTIPLY,
     BINARY_DIVIDE,
-    BINARY_NONE,
     BINARY_SHIFT_RIGHT,
     BINARY_SHIFT_LEFT,
     BINARY_LOGICAL_OR,

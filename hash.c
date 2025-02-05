@@ -6,11 +6,10 @@
 #define MAX_LOAD_FACTOR 0.5f
 #define HASH_PRIME 0x00000100000001b3
 
-
 void hashBytes(Hash* hash, const void* bytes, size_t count) {
     const char* chars = bytes;
     for (size_t i = 0; i < count; ++i) {
-	    *hash ^= chars[i];
+        *hash ^= chars[i];
         *hash *= HASH_PRIME;
     }
 }
@@ -26,13 +25,15 @@ void hashString(Hash* hash, const char* string) {
 
 
 Set setNew(HashFn hashFn, EqualsFn equalsFn) {
-    return (Set) {
+    Set set = (Set) {
         .entries = NULL,
         .capacity = 0,
         .count = 0,
         .hashFn = hashFn,
         .equalsFn = equalsFn,
     };
+    setExtend(&set);
+    return set;
 }
 
 static Entry* setGetEntryHashed(Set* set, const void* key, Hash hash) {
@@ -130,5 +131,18 @@ void* setDelete(Set* set, void* key) {
         entry->hash = 1;
     }
     return oldData;
+}
+
+void setFree(Set* set) {
+    free(set->entries);
+}
+
+void setFreeAll(Set* set) {
+    Entry* current = NULL;
+    while ((current = setIterate(set, current))) {
+        free(current->data);
+    }
+
+    setFree(set);
 }
 

@@ -11,6 +11,7 @@ typedef enum {
     TYPE_VOID,
     TYPE_INTEGER,
     TYPE_POINTER,
+    TYPE_ARRAY,
 } TypeTag;
 
 typedef enum {
@@ -33,12 +34,17 @@ typedef struct Type {
             Signedness sign;
         } integer;
         const struct Type* pointer;
+        struct {
+            const struct Type* element;
+            int length;
+        } array;
     };
 } Type;
 
 Type* typeNew(Arena* arena, TypeTag tag);
 const Type* typeInteger(Arena* arena, Signedness sign, IntegerSize size);
 const Type* typePointer(Arena* arena, const Type* inner);
+const Type* typeArray(Arena* arena, const Type* element, int length);
 //const Type* typeVoid();
 
 //const Type* typeUChar();

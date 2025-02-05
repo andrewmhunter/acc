@@ -8,13 +8,13 @@
 #include "diag.h"
 
 char* loadStdin() {
-    const int chunkSize = 512;
+    const int chunkSize = 32;
     char* text = NULL;
     size_t bytesRead = 0;
     size_t size = 0;
     do {
         text = realloc(text, size + chunkSize);
-        bytesRead = fread(text, 1, chunkSize, stdin);
+        bytesRead = fread(text + size, 1, chunkSize, stdin);
         size += bytesRead;
 
     } while(bytesRead == chunkSize);
@@ -82,5 +82,4 @@ int main(int argc, char** argv) {
     }
     return 0;
 }
-
 

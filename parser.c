@@ -54,12 +54,8 @@ static bool match(Parser* parser, TokenType kind, Token* tokenOut) {
     return false;
 }
 
-static Position tokenEnd(const Token* token) {
-    return token->start + token->length - 1;
-}
-
 static Location tokenLoc(const Token* token) {
-    return locNew(token->start, tokenEnd(token));
+    return locNew(token->position, token->position + token->length - 1);
 }
 
 static void verror(Parser* parser, Token* token, const char* message, va_list args) {
@@ -123,7 +119,7 @@ static Location consume(Parser* parser, TokenType kind, const char* message) {
 }
 
 static Identifier makeIdentifier(Token token) {
-    Identifier id = {.start = token.start, .length = token.length};
+    Identifier id = {.start = token.start, .length = token.length, .position = token.position};
     return id;
 }
 

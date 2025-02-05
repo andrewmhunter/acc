@@ -1,5 +1,6 @@
+programs/
+.cache/
 acc
 a.out
-programs/
 ARENA_TEST.c
 HASH_TEST.c

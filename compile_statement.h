@@ -4,7 +4,7 @@
 #include "compiler.h"
 #include "statement.h"
 
-void compileFunction(Compiler* compiler, const FunctionDeclaration* decl);
+Function* compileFunction(Compiler* compiler, const FunctionDeclaration* decl);
 void compileProgram(Compiler* compiler, const Program* program);
 
 #endif

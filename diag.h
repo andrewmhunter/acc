@@ -14,6 +14,7 @@ typedef struct {
     int fileNameLength;
     int line;
     int column;
+    int lineStart;
 } QualifiedPosition;
 
 typedef struct {
@@ -21,14 +22,15 @@ typedef struct {
     QualifiedPosition end;
 } QualifiedLocation;
 
-typedef const char* Position;
+//typedef const char* Position;
+typedef int Position;
 
 typedef struct {
     Position start;
     Position end;
 } Location;
 
-#define NO_POSITION ((Position)NULL)
+#define NO_POSITION ((Position)-1)
 #define NO_LOCATION ((Location){.start = NO_POSITION, .end = NO_POSITION})
 
 
@@ -64,7 +66,7 @@ void panic(const char* fileName, int line, const char* function, const char* for
 void vpanic(const char* fileName, int line, const char* function, const char* format, va_list args);
 
 #define PANIC(FORMAT, ...) \
-    panic(__FILE__, __LINE__, __PRETTY_FUNCTION__, (FORMAT) __VA_OPT__(,) __VA_ARGS__)
+    panic(__FILE__, __LINE__, __FUNCTION__, (FORMAT) __VA_OPT__(,) __VA_ARGS__)
 
 #define UNREACHABLE() \
     PANIC("unreachable code")

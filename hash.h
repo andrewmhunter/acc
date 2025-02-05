@@ -40,5 +40,8 @@ void* setInsert(Set* set, void* key);
 Entry* setIterate(Set* set, Entry* current);
 void* setDelete(Set* set, void* key);
 
+void setFree(Set* set);
+void setFreeAll(Set* set);
+
 #endif
 
