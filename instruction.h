@@ -99,6 +99,7 @@ typedef enum: char {
     INS_COMMENT,
     INS_COMMENT_STATEMENT,
     INS_COMMENT_LOCATION,
+    INS_COMMENT_ALLOCATION,
     INS_MOV,
     INS_NOT,
     INS_ADD,
@@ -139,6 +140,11 @@ typedef struct {
             const char* string;
             const Statement* statement;
             Location location;
+            struct {
+                Identifier ident;
+                int offset;
+                int size;
+            } allocation;
         } comment;
     };
 } Instruction;

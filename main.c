@@ -1,11 +1,13 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include "scanner.h"
 #include "compiler.h"
 #include "parser.h"
 #include "mem.h"
 #include "compile_statement.h"
 #include "diag.h"
+#include "optimizer.h"
 
 char* loadStdin() {
     const int chunkSize = 32;
@@ -41,26 +43,72 @@ char* loadFile(const char* fileName) {
     return text;
 }
 
+typedef struct {
+    char* const* argv;
+    int argc;
+    int index;
+    bool error;
+} ArgumentParser;
+
+static bool checkArg(ArgumentParser* args, const char* argName, bool hasArgument) {
+    if (strcmp(args->argv[args->index], argName) == 0) {
+        args->index += 1;
+        if (hasArgument && args->index >= args->argc) {
+            args->error = true;
+            fprintf(stderr, "Error: missing parameter to argument '%s'\n", argName);
+            return false;
+        }
+        return true;
+    }
+    return false;
+}
+
 int main(int argc, char** argv) {
+    ArgumentParser args = (ArgumentParser) {
+        .argv = argv,
+        .argc = argc,
+        .index = 1,
+        .error = false,
+    };
+
+    int optimizationLevel = DEFAULT_OPTIMIZATION_LEVEL;
+    const char* defaultFilename = "<stdin>";
     char* text = NULL;
-    switch (argc) {
-        case 1:
+
+    while (args.index < argc) {
+        if (checkArg(&args, "-O0", false)) {
+            optimizationLevel = 0;
+        } else if (checkArg(&args, "-O1", false)) {
+            optimizationLevel = 1;
+        } else if (checkArg(&args, "-O2", false)) {
+            optimizationLevel = 2;
+        } else if (checkArg(&args, "-O3", false)) {
+            optimizationLevel = 3;
+        } else if (checkArg(&args, "--", false)) {
             text = loadStdin();
-            break;
-        case 2:
-            text = loadFile(argv[1]);
-            break;
-        default:
-            fprintf(stderr, "incorrect command line arguments\n");
-            return 1;
+        } else {
+            if (strlen(argv[args.index]) > 0 && argv[args.index][0] == '-') {
+                fprintf(stderr, "Error: invalid command line argument '%s'\n", argv[args.index]);
+                args.error = true;
+            } else if (!args.error) {
+                defaultFilename = argv[args.index];
+                text = loadFile(argv[args.index]);
+            }
+            args.index++;
+        }
+    }
+
+    if (args.error) {
+        return 1;
     }
 
     if (text == NULL) {
+        fprintf(stderr, "Error: no input file\n");
         return 1;
     }
 
     Arena staticLifetime = arenaNew();
-    Diagnostics diag = newDiagnostics(text);
+    Diagnostics diag = newDiagnostics(defaultFilename, text);
 
     Scanner scan = newScanner(text);
     Parser parser = newParser(&staticLifetime, &diag, scan);
@@ -71,7 +119,7 @@ int main(int argc, char** argv) {
         return 2;
     }
 
-    Compiler compiler = compilerNew(&staticLifetime, &diag, program.declarations);
+    Compiler compiler = compilerNew(&staticLifetime, &diag, program.declarations, optimizationLevel);
     compileProgram(&compiler, &program);
 
     arenaFree(&staticLifetime);

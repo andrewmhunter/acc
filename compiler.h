@@ -2,6 +2,7 @@
 #define COMPILER_H
 
 #define PRINT_DELETED
+#define PRINT_ALLOCATIONS
 #define EMIT_COMMENTS_STATEMENT
 //#define EMIT_COMMENTS_LOCATION
 
@@ -12,10 +13,11 @@
 #include "diag.h"
 
 typedef struct {
-    Identifier ident;
     const Type* type;
+    // Value value;
+    Identifier ident;
     int depth;
-    size_t offset;
+    int offset;
 } StackElement;
 
 struct Compiler;
@@ -48,9 +50,10 @@ typedef struct Compiler {
     int label;
     int globalCount;
     Declaration* const* globals;
+    int optimizationLevel;
 } Compiler;
 
-Compiler compilerNew(Arena* staticLifetime, Diagnostics* diag, Declaration* const* declarations);
+Compiler compilerNew(Arena* staticLifetime, Diagnostics* diag, Declaration* const* declarations, int optimizationLevel);
 Function* functionNew(Arena* arena, Compiler* compiler, const FunctionDeclaration* decl);
 
 void printFunction(FILE* file, const Function* func);
@@ -59,6 +62,7 @@ void emitComment(Function* func, const char* comment);
 void emitCommentf(Function* func, const char* format, ...);
 void emitCommentStatement(Function* func, const Statement* stmt);
 void emitCommentLocation(Function* func, Location loc);
+void emitCommentAllocation(Function* func, Identifier ident, int offset, int size);
 
 void emitImplied(Function* func, Opcode opcode);
 void emitReg(Function* func, Opcode opcode, Reg reg);

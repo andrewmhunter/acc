@@ -10,6 +10,7 @@ SRCS := main.c scanner.c mem.c parser.c expression.c statement.c type.c \
 OBJS := $(SRCS:%.c=$(DIR)/%.o)
 DEPS := $(OBJS:.o=.d)
 
+# CFLAGS := -c -O2
 CFLAGS := -g -c
 CPPFLAGS := -MD -MP
 LDFLAGS :=
@@ -32,3 +33,4 @@ install:
 	cp acc-pipeline $(HOME)/.local/bin/acc-pipeline
 
 -include $(DEPS)
+

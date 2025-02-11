@@ -18,11 +18,8 @@ static bool ruleDeadCode(Optimizer* optim) {
 }
 
 static bool binaryToUnary(Optimizer* optim, Opcode initialOp, Opcode swapOp, int onValue) {
-    const InstructionPrototype prototype = {
-        .opcode = initialOp,
-        .dest = ADDRESS_REGISTER,
-        .src = ADDRESS_VALUE,
-    };
+    const InstructionPrototype prototype = 
+        PROTOTYPE_2(initialOp, ADDRESS_REGISTER, ADDRESS_VALUE);
 
     Instruction* initial = NULL;
     Reg reg = REG_A;
@@ -53,11 +50,8 @@ static bool ruleSubbToDecb(Optimizer* optim) {
 }
 
 static bool unaryInPlace(Optimizer* optim, Opcode op) {
-    const InstructionPrototype prototype = {
-        .opcode = op,
-        .dest = ADDRESS_REGISTER,
-        .src = ADDRESS_IMPLIED,
-    };
+    const InstructionPrototype prototype =
+        PROTOTYPE_1(op, ADDRESS_REGISTER);
 
     Reg reg = REG_INVALID;
     const Value* value = NULL;
@@ -197,6 +191,29 @@ static bool ruleConditionalJumpOverJump(Optimizer* optim) {
     return true;
 }
 
+static bool ruleTailCall(Optimizer* optim) {
+    static const InstructionPrototype callPrototype =
+        PROTOTYPE_1(INS_CALL, ADDRESS_VALUE);
+
+    Instruction* call = NULL;
+    const Value* val = NULL;
+    Match callMatch = matchAllowFlow(matchInstructionValue(&callPrototype, &val));
+    if (!matchPattern(optim, &call, callMatch)) {
+        return false;
+    }
+
+    static const InstructionPrototype retPrototype = PROTOTYPE_0(INS_RET);
+
+    Instruction* ret = NULL;
+    Match retMatch = matchAllowExit(matchInstruction(&retPrototype));
+    if (!matchPattern(optim, &ret, retMatch)) {
+        return false;
+    }
+
+    call->opcode = INS_JMP;
+    optimDelete(ret);
+    return true;
+}
 
 static const Optimization optimizations[] = {
     {"deadCode", ruleDeadCode, 1},
@@ -212,6 +229,8 @@ static const Optimization optimizations[] = {
     {"doubleLoad", ruleDoubleLoad, 2},
     {"loadAfterStore", ruleLoadAfterStore, 2},
     {"doubleStore", ruleDoubleStore, 2},
+
+    {"tailCall", ruleTailCall, 1},
 
     {"incInPlace", ruleIncInPlace, 1},
     {"inccInPlace", ruleInccInPlace, 1},

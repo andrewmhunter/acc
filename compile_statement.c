@@ -5,6 +5,9 @@
 #include "compile_expression.h"
 #include "compile_condition.h"
 #include "optimizer.h"
+#include <string.h>
+#include <stdio.h>
+#include <stdlib.h>
 
 static void compileStatement(Function* func, const Statement* stmt);
 
@@ -202,7 +205,7 @@ Function* compileFunction(Compiler* compiler, const FunctionDeclaration* decl) {
     compileStatement(func, decl->body);
     emitImplied(func, INS_RET);
 
-    optimizeFunction(func->lifetime, func, DEFAULT_OPTIMIZATION_LEVEL);
+    optimizeFunction(func->lifetime, func, func->compiler->optimizationLevel);
 
     printFunction(stdout, func);
 
@@ -223,8 +226,20 @@ void compileGlobalVariable(Compiler* compiler, const VariableDeclaration* decl) 
 }
 
 void compileProgram(Compiler* compiler, const Program* program) {
-    fprintf(stdout, "    call main\n");
-    fprintf(stdout, "    hlt\n");
+    fprintf(stdout,
+        "    call main\n"
+        "    hlt\n"
+        "out:\n"
+        "    mov a, [_Stack_out + 0]\n"
+        "    out a\n"
+        "    ret\n"
+        "variable _Stack_out 1\n"
+        "\n"
+        //"include \"stdlib/multiply.spdr\"\n"
+        //"include \"stdlib/multiply_16.spdr\"\n"
+        //"include \"stdlib/divide.spdr\"\n"
+        //"include \"stdlib/divide_16.spdr\"\n"
+    );
 
     Function* head = NULL;
     Function** nextFunction = &head;
@@ -249,16 +264,18 @@ void compileProgram(Compiler* compiler, const Program* program) {
         }
     }
 
-    fprintf(stdout,
-        "out:\n"
-        "    mov a, [_Stack_out + 0]\n"
-        "    out a\n"
-        "    ret\n"
-        "variable _Stack_out 1\n"
-        //"include \"stdlib/multiply.spdr\"\n"
-        //"include \"stdlib/multiply_16.spdr\"\n"
-        //"include \"stdlib/divide.spdr\"\n"
-        //"include \"stdlib/divide_16.spdr\"\n"
-    );
+    const char mainName[] = "main";
+    Identifier mainId = {.start = mainName, .length = strlen(mainName), .position = -1};
+    const Declaration* mainDecl = lookupGlobal(compiler, mainId);
+
+    if (mainDecl == NULL || mainDecl->kind != DECL_FUNCTION) {
+        printError(compiler->diag, NO_LOCATION, "main function not defined");
+        return;
+    }
+
+    if (mainDecl->function.arity != 0) {
+        printError(compiler->diag, identLoc(&mainDecl->function.parameters[0].name), "main function should take no arguments");
+        return;
+    }
 }
 

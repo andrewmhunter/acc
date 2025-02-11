@@ -25,7 +25,6 @@ static Value getValueTarget(Function* func, Target target, const Type* type) {
     }
 }
 
-// TODO: Very poor generated code. Need to add multipart value types.
 static Value widenUnsignedInteger(
         Function* func,
         Value value,
@@ -308,6 +307,7 @@ static Value performSimpleBinary(
 }
 
 static Value multiplyByImmediate(Function* func, Value lhs, int rhs, Target target);
+static Value divideByImmediate(Function* func, Value lhs, int rhs, Target target);
 
 static Value pointerAllowedArithmetic(
     Function* func,
@@ -355,13 +355,8 @@ static Value subtractValues(Function* func, Value lhs, Value rhs, Target target)
     );
 }
 
-static Value leftShiftValue(
-        Function* func,
-        Value toShift,
-        Value shiftBy,
-        Target target,
-        bool noOptimize
-    );
+
+static Value leftShiftValue(Function* func, Value toShift, Value shiftBy, Target target, bool noOptimize);
 
 static Value leftShiftByImmediate(
         Function* func,
@@ -464,6 +459,50 @@ static Value multiplyValues(Function* func, Value lhs, Value rhs, Target target)
     }
     if (immediateResolved(&lhs, &literal)) {
         return multiplyByImmediate(func, rhs, literal, target);
+    }
+
+    UNIMPLEMENTED();
+}
+
+static Value rightShiftByImmediate(
+        Function* func,
+        Value toShift,
+        int shiftBy,
+        Target target
+) {
+    if (shiftBy == 0) {
+        return moveValueToTarget(func, toShift, target);
+    }
+
+    Value tvalue = getValueTarget(func, target, toShift.type);
+    toShift = moveValueToTarget(func, toShift, targetType(tvalue.type));
+
+    if (shiftBy >= typeSize(tvalue.type) * 8) {
+        return moveValueToValue(func, valueZero(tvalue.type), tvalue);
+    }
+
+    int size = typeSize(tvalue.type);
+    for (int i = 0; i < shiftBy; ++i) {
+        Opcode ins = INS_SHR;
+        for (int j = size - 1; j >= 0; --j) {
+            load(func, REG_A, toShift, j);
+            emitReg(func, ins, REG_A);
+            store(func, tvalue, j, REG_A);
+
+            ins = INS_ROR;
+        }
+    }
+
+    return moveValueToTarget(func, tvalue, target);
+}
+
+static Value divideByImmediate(Function* func, Value lhs, int rhs, Target target) {
+    if (rhs == 0) {
+        return moveValueToTarget(func, valueZero(lhs.type), target);
+    }
+
+    if (rhs > 0 && intIsPowerOf2(rhs)) {
+        return rightShiftByImmediate(func, lhs, ceilLog2(rhs), target);
     }
 
     UNIMPLEMENTED();
@@ -632,16 +671,16 @@ static Value compileFunctionCall(
         offset = typeSize(funcDecl->returnType);
     }
 
-    // TODO: Currently if a function call is used in as an argument to itself
+    // TODO: Currently if a function call is used in an argument to itself
     // it will be overwritten
     for (size_t i = 0; i < funcDecl->arity; ++i) {
         const Type* ty = funcDecl->parameters[i].type;
-        Value argValue = valueStackOffset(func->lifetime, ty, &name, offset, NO_LOCATION);
+        Value argValue = valueStackOffset(func->lifetime, ty, &funcDecl->name, offset, NO_LOCATION);
         offset += typeSize(ty);
         compileExpression(func, arguments[i], targetValue(argValue));
     }
 
-    emitValue(func, INS_CALL, valueImmediateExpr(typeAnyInteger(), nameExpr), 0);
+    emitValue(func, INS_CALL, valueImmediateExpr(&typeAnyInt, nameExpr), 0);
 
     if (isVoid(funcDecl->returnType) || target.kind == TARGET_DISCARD) {
         return valueDiscard();
@@ -658,7 +697,7 @@ static Value compileVariableExpression(Function* func, Identifier ident, Target 
 }
 
 static Value compileLiteralExpression(Function* func, const Expression* expr, Target target) {
-    Value value = valueImmediateExpr(typeAnyInteger(), expr);
+    Value value = valueImmediateExpr(&typeAnyInt, expr);
     return moveValueToTarget(func, value, target);
 }
 

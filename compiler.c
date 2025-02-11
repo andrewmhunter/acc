@@ -10,14 +10,14 @@
 /// Initalizers
 /// ############################################################################
 
-Compiler compilerNew(Arena* staticLifetime, Diagnostics* diag, Declaration* const* declarations) {
+Compiler compilerNew(Arena* staticLifetime, Diagnostics* diag, Declaration* const* declarations, int optimizationLevel) {
     return (Compiler) {
         .lifetime = staticLifetime,
         .diag = diag,
         .label = 0,
-        //.globals = setNew(globalHash, globalEquals),
         .globalCount = 0,
         .globals = declarations,
+        .optimizationLevel = optimizationLevel,
     };
 }
 
@@ -77,6 +77,19 @@ void emitCommentStatement(Function* func, const Statement* stmt) {
 void emitCommentLocation(Function* func, Location loc) {
     appendInstruction(func, (Instruction) {.opcode = INS_COMMENT_LOCATION, .comment = {.location = loc}});
 }
+
+void emitCommentAllocation(Function* func, Identifier ident, int offset, int size) {
+    appendInstruction(func, (Instruction) {
+        .opcode = INS_COMMENT_ALLOCATION, .comment = {
+            .allocation = {
+                .ident = ident,
+                .offset = offset,
+                .size = size
+            }
+        }
+    });
+}
+
 
 void emitImplied(Function* func, Opcode opcode) {
     appendInstruction(func, instruction0(opcode));
@@ -168,7 +181,7 @@ void transfer(Function* func, Reg dest, Reg src) {
 
 Value createLabel(Compiler* compiler) {
     Label label = compiler->label++;
-    return valueImmediateExpr(typeAnyInteger(), exprLabel(compiler->lifetime, label, NO_LOCATION));
+    return valueImmediateExpr(&typeAnyInt, exprLabel(compiler->lifetime, label, NO_LOCATION));
 }
 
 static Value pushStackLocation(Function* func, const Type* type, Identifier ident, Location loc) {
@@ -183,27 +196,19 @@ static Value pushStackLocation(Function* func, const Type* type, Identifier iden
     size_t offset = func->currentStackSize;
 
     StackElement* element = &func->stack[func->stackLength++];
-    element->type = type;
-    element->ident = ident;
-    element->depth = func->scopeDepth;
-    element->offset = offset;
+    *element = (StackElement) {
+        .type = type,
+        .ident = ident,
+        .depth = func->scopeDepth,
+        .offset = offset,
+    };
 
     func->currentStackSize += typeSize(type);
     func->maxStackSize = MAX(func->maxStackSize, func->currentStackSize);
 
-    if (typeSize(type) > 1) {
-        fprintf(stdout, ";  Alloc: %lu -> %lu: ", offset, offset + typeSize(type) - 1);
-    } else {
-        fprintf(stdout, ";  Alloc: %lu: ", offset);
-    }
-
-    if (ident.start != NULL) {
-        identPrint(stdout, &ident);
-    } else {
-        fprintf(stdout, "?");
-    }
-    fprintf(stdout, "\n");
-
+#ifdef PRINT_ALLOCATIONS
+    emitCommentAllocation(func, ident, offset, typeSize(type));
+#endif
 
     return valueStackOffset(func->lifetime, type, &func->decl->name, offset, loc);
 }

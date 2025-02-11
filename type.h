@@ -33,11 +33,10 @@ typedef struct Type {
             IntegerSize size;
             Signedness sign;
         } integer;
-        const struct Type* pointer;
         struct {
-            const struct Type* element;
+            const struct Type* pointer;
             int length;
-        } array;
+        };
     };
 } Type;
 
@@ -48,7 +47,7 @@ const Type* typeArray(Arena* arena, const Type* element, int length);
 //const Type* typeVoid();
 
 //const Type* typeUChar();
-const Type* typeAnyInteger();
+//const Type* typeAnyInteger();
 
 int typeSize(const Type* type);
 

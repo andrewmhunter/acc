@@ -35,20 +35,10 @@ const Type* typePointer(Arena* arena, const Type* inner) {
 
 const Type* typeArray(Arena* arena, const Type* element, int length) {
     Type* type = typeNew(arena, TYPE_ARRAY);
-    type->array.element = element;
-    type->array.length = length;
+    type->pointer = element;
+    type->length = length;
     return type;
 }
-
-//const Type* typeVoid() {
-//    static Type inner = (Type) {.tag = TYPE_VOID};
-//    return &inner;
-//}
-//
-//const Type* typeUChar() {
-//    static Type inner = (Type) {.tag = TYPE_INTEGER, .integer = {.size = SIZE_BYTE, .sign = SIGN_UNSIGNED}};
-//    return &inner;
-//}
 
 const Type* typeAnyInteger() {
     static Type inner = (Type) {.tag = TYPE_INTEGER, .integer = {.size = SIZE_ANY, .sign = SIGN_EITHER}};
@@ -76,7 +66,7 @@ int typeSize(const Type* type) {
         case TYPE_POINTER:
             return WORD_SIZE;
         case TYPE_ARRAY:
-            return typeSize(type->array.element) * type->array.length;
+            return typeSize(type->pointer) * type->length;
         case TYPE_VOID:
             return 1;
     }
@@ -104,8 +94,8 @@ void typePrint(FILE* file, const Type* type) {
             fprintf(file, "*");
             break;
         case TYPE_ARRAY:
-            typePrint(file, type->array.element);
-            fprintf(file, "[%d]", type->array.length);
+            typePrint(file, type->pointer);
+            fprintf(file, "[%d]", type->length);
             break;
         case TYPE_VOID:
             fprintf(file, "void");
@@ -129,8 +119,8 @@ bool typeEquals(const Type* t0, const Type* t1) {
         case TYPE_POINTER:
             return typeEquals(t0->pointer, t1->pointer);
         case TYPE_ARRAY:
-            return typeEquals(t0->array.element, t1->array.element)
-                && t0->array.length == t1->array.length;
+            return typeEquals(t0->pointer, t1->pointer)
+                && t0->length == t1->length;
         case TYPE_VOID:
             return true;
     }
@@ -139,6 +129,14 @@ bool typeEquals(const Type* t0, const Type* t1) {
 bool typeCompatible(const Type* t0, const Type* t1) {
     if (t0 == NULL || t1 == NULL) {
         return true;
+    }
+
+    if ((t0->tag == TYPE_ARRAY || t0->tag == TYPE_POINTER)
+        && (t1->tag == TYPE_ARRAY || t1->tag == TYPE_POINTER)
+    ) {
+        return typeEquals(t0->pointer, t1->pointer)
+            || t0->pointer->tag == TYPE_VOID
+            || t1->pointer->tag == TYPE_VOID;
     }
 
     if (t0->tag != t1->tag) {
@@ -162,7 +160,11 @@ bool typeCompatible(const Type* t0, const Type* t1) {
                 || t1->pointer->tag == TYPE_VOID;
         case TYPE_VOID:
             return true;
+        default:
+            break;
     }
+
+    return false;
 }
 
 bool typeConvertable(const Type* from, const Type* into) {
@@ -196,7 +198,7 @@ bool isInteger(const Type* type) {
 }
 
 bool isPointer(const Type* type) {
-    return type != NULL ? type->tag == TYPE_POINTER : false;
+    return type != NULL ? type->tag == TYPE_POINTER || type->tag == TYPE_ARRAY : false;
 }
 
 const Type* integerPromotion(const Type* t0, const Type* t1) {

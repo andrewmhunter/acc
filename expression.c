@@ -366,7 +366,7 @@ void exprPrint(FILE* file, const Expression* expr) {
         case EXPR_CALL:
             exprPrint(file, expr->call.name);
             fprintf(file, "(");
-            for (size_t i = 0; i < expr->call.argumentCount; ++i) {
+            for (int i = 0; i < expr->call.argumentCount; ++i) {
                 exprPrint(file, expr->call.arguments[i]);
                 if (i != expr->call.argumentCount - 1) {
                     fprintf(file, ", ");

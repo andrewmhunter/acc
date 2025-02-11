@@ -9,8 +9,9 @@
 #define ANSI_RED 31
 #define ANSI_PURPLE 35
 
-Diagnostics newDiagnostics(const char* text) {
+Diagnostics newDiagnostics(const char* defaultFilename, const char* text) {
     return (Diagnostics) {
+        .defaultFilename = defaultFilename,
         .fileText = text,
         .errorCount = 0,
         .warningCount = 0,
@@ -36,8 +37,6 @@ Location locNew(Position start, Position end) {
     };
 }
 
-static const char defaultFilename[] = "<source>";
-
 static void parseStringLocation(const char* string, QualifiedPosition* into) {
     int newLine = 0;
     int fnameStart = 0;
@@ -56,8 +55,8 @@ static void parseStringLocation(const char* string, QualifiedPosition* into) {
 
 static QualifiedPosition positionQualify(Diagnostics* diag, Position position) {
     QualifiedPosition qualified = {
-        .fileName = defaultFilename,
-        .fileNameLength = strlen(defaultFilename),
+        .fileName = diag->defaultFilename,
+        .fileNameLength = strlen(diag->defaultFilename),
         .line = 1,
         .column = 1,
         .lineStart = 0
@@ -171,7 +170,6 @@ static void diagnosticStart(Diagnostics* diag, int color, const char* level, Loc
 void errorStart(Diagnostics* diag, Location location) {
     diagnosticStart(diag, ANSI_RED, "error", location);
     diag->errorCount += 1;
-    raise(SIGTRAP);
 }
 
 void warningStart(Diagnostics* diag, Location location) {

@@ -59,7 +59,7 @@ typedef struct Expression {
         struct {
             const struct Expression* name;
             const struct Expression** arguments;
-            size_t argumentCount;
+            int argumentCount;
             Position endPosition;
         } call;
 

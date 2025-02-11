@@ -46,6 +46,7 @@ void* resizeArray(
 }
 
 #define REGION_BASE_SIZE 0x1000
+//#define REGION_BASE_SIZE 0x1
 
 static Region* regionNew(size_t minSize) {
     size_t blockSize = MAX(minSize, REGION_BASE_SIZE);

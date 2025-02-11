@@ -38,6 +38,15 @@ typedef struct {
     AddressType src;
 } InstructionPrototype;
 
+#define PROTOTYPE_2(OPCODE, DEST, SRC) \
+    ((InstructionPrototype) {.opcode = (OPCODE), .dest = (DEST), .src = (SRC)})
+
+#define PROTOTYPE_1(OPCODE, DEST) \
+    PROTOTYPE_2(OPCODE, DEST, ADDRESS_IMPLIED)
+
+#define PROTOTYPE_0(OPCODE) \
+    PROTOTYPE_1(OPCODE, ADDRESS_IMPLIED)
+
 typedef struct Match {
     MatchKind kind;
     MatchFlags flags;

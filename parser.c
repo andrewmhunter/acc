@@ -556,6 +556,13 @@ Declaration* parseDeclaration(Parser* parser) {
     const Type* ty = type(parser);
     Identifier name = identifier(parser);
 
+    /*if (match(parser, TOK_SQUARE_LEFT, NULL)) {
+        const Expression* length = expression(parser);
+        consume(parser, TOK_SQUARE_RIGHT, "expected ']'");
+
+        
+    }*/
+
     if (match(parser, TOK_SEMICOLON, NULL)) {
         return variableDeclarationNew(
                 parser->staticLifetime,

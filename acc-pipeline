@@ -7,5 +7,5 @@ then
     ACC=./acc
 fi
 
-cpp "$@" -D __SPDR__ -D __ACC__ -undef -nostdinc | "$ACC"
+cpp "$@" -D __SPDR__ -D __ACC__ -undef -nostdinc | "$ACC" --
 

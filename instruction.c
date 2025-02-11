@@ -381,6 +381,21 @@ void printOpcode(FILE* file, Opcode opcode) {
     fprintf(file, "%s", arr[opcode]);
 }
 
+static void printAllocation(FILE* file, const Identifier* ident, int offset, int size) {
+    if (size > 1) {
+        fprintf(file, ";  Alloc: %d -> %d: ", offset, offset + size - 1);
+    } else {
+        fprintf(file, ";  Alloc: %d: ", offset);
+    }
+
+    if (ident->start != NULL) {
+        identPrint(file, ident);
+    } else {
+        fprintf(file, "?");
+    }
+    fprintf(file, "\n");
+}
+
 void printInstruction(FILE* file, const Instruction* ins, Diagnostics* diag) {
     switch (ins->opcode) {
         case INS_LABEL:
@@ -403,6 +418,16 @@ void printInstruction(FILE* file, const Instruction* ins, Diagnostics* diag) {
             }
             fprintf(file, "\n");
             return;
+        case INS_COMMENT_ALLOCATION:
+        {
+            printAllocation(
+                file,
+                &ins->comment.allocation.ident,
+                ins->comment.allocation.offset,
+                ins->comment.allocation.size
+            );
+            return;
+        }
         default:
             break;
     }

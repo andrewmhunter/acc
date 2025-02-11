@@ -35,12 +35,13 @@ typedef struct {
 
 
 typedef struct {
+    const char* defaultFilename;
     const char* fileText;
     int errorCount;
     int warningCount;
 } Diagnostics;
 
-Diagnostics newDiagnostics(const char* text);
+Diagnostics newDiagnostics(const char* defaultFilename, const char* text);
 
 Position positionMin(Position pos0, Position pos1);
 Position positionMax(Position pos0, Position pos1);

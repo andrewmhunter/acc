@@ -560,22 +560,16 @@ Match matchInstructionValue(const InstructionPrototype* prototype, const Value**
 }
 
 Match matchLoad(Reg* regOut, const Value** valueOut) {
-    static const InstructionPrototype loadPrototype = {
-        .opcode = INS_MOV,
-        .dest = ADDRESS_REGISTER,
-        .src = ADDRESS_VALUE,
-    };
+    static const InstructionPrototype loadPrototype
+        = PROTOTYPE_2(INS_MOV, ADDRESS_REGISTER, ADDRESS_VALUE);
 
     return matchInstructionRegValue(&loadPrototype, regOut, valueOut);
 }
 
 
 Match matchStore(const Value** valueOut, Reg* regOut) {
-    static const InstructionPrototype storePrototype = {
-        .opcode = INS_MOV,
-        .dest = ADDRESS_VALUE,
-        .src = ADDRESS_REGISTER,
-    };
+    static const InstructionPrototype storePrototype = 
+        PROTOTYPE_2(INS_MOV, ADDRESS_VALUE, ADDRESS_REGISTER);
 
     return matchInstructionValueReg(&storePrototype, valueOut, regOut);
 }
@@ -661,6 +655,7 @@ bool opcodeSkip(Opcode opcode) {
         case INS_COMMENT:
         case INS_COMMENT_LOCATION:
         case INS_COMMENT_STATEMENT:
+        case INS_COMMENT_ALLOCATION:
             return true;
         default:
             break;
