@@ -64,6 +64,10 @@ Target targetType(const Type* type) {
 }
 
 const Type* getTargetType(const Target* target) {
+    if (target == NULL) {
+        return NULL;
+    }
+
     if (target->kind == TARGET_VALUE) {
         return target->value.type;
     }
@@ -81,12 +85,14 @@ const Type* getTargetTypeOr(const Target* target, const Type* type) {
     return type;
 }
 
-const Type* commonType(const Type* t0, const Type* t1, const Target* target) {
-    const Type* ttype = getTargetType(target);
-    if (ttype != NULL) {
-        return ttype;
+const Type* commonType(Diagnostics* diag, const Type* t0, const Type* t1, const Target* target, Location location) {
+    if (target != NULL) {
+        const Type* ttype = getTargetType(target);
+        if (ttype != NULL) {
+            return ttype;
+        }
     }
-    return integerPromotion(t0, t1);
+    return integerPromotion(diag, t0, t1, location);
 }
 
 ConditionTarget conditionTarget(Value label, Invert invert) {
@@ -139,6 +145,10 @@ Value valueStackOffset(Arena* arena, const Type* type, const Identifier* functio
     return valueDirectExpr(type, exprStackOffset(arena, functionName, offset, location));
 }
 
+Value valueStackOffsetImmediate(Arena* arena, const Type* type, const Identifier* functionName, int offset, Location location) {
+    return valueImmediateExpr(type, exprStackOffset(arena, functionName, offset, location));
+}
+
 Value valueDirectExpr(const Type* type, const Expression* expr) {
     return (Value) {
         .kind = VALUE_DIRECT,
@@ -147,10 +157,10 @@ Value valueDirectExpr(const Type* type, const Expression* expr) {
     };
 }
 
-Value valueDiscard() {
+Value valueDiscard(const Type* type) {
     return (Value) {
         .kind = VALUE_DISCARD,
-        .type = &typeVoid
+        .type = type
     };
 }
 

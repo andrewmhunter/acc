@@ -13,6 +13,7 @@ const Type typeAnyInt = INTEGER(SIGN_EITHER, SIZE_ANY);
 const Type typeChar = INTEGER(SIGN_SIGNED, SIZE_BYTE);
 const Type typeUChar = INTEGER(SIGN_UNSIGNED, SIZE_BYTE);
 const Type typeVoid = (Type){.tag = TYPE_VOID};
+const Type typeBool = typeUInt;
 
 Type* typeNew(Arena* arena, TypeTag tag) {
     Type* type = ARENA_ALLOC(arena, Type);
@@ -57,6 +58,10 @@ int typeSize(const Type* type) {
                     return 1;
                 case SIZE_INT:
                     return WORD_SIZE;
+                case SIZE_24:
+                    return 3;
+                case SIZE_LONG:
+                    return 4;
                 case SIZE_ANY:
                     return WORD_SIZE;
                     assert(false && "any sized interger must be converted to"
@@ -83,10 +88,22 @@ void typePrint(FILE* file, const Type* type) {
                 fprintf(file, "unsigned ");
             }
 
-            if (type->integer.size == SIZE_INT) {
-                fprintf(file, "int");
-            } else {
-                fprintf(file, "char");
+            switch (type->integer.size) {
+                case SIZE_BYTE:
+                    fprintf(file, "char");
+                    break;
+                case SIZE_INT:
+                    fprintf(file, "int");
+                    break;
+                case SIZE_24:
+                    fprintf(file, "int24_t");
+                    break;
+                case SIZE_LONG:
+                    fprintf(file, "long");
+                    break;
+                case SIZE_ANY:
+                    fprintf(file, "int_any");
+                    break;
             }
             break;
         case TYPE_POINTER:
@@ -131,9 +148,7 @@ bool typeCompatible(const Type* t0, const Type* t1) {
         return true;
     }
 
-    if ((t0->tag == TYPE_ARRAY || t0->tag == TYPE_POINTER)
-        && (t1->tag == TYPE_ARRAY || t1->tag == TYPE_POINTER)
-    ) {
+    if (isPointer(t0) && isPointer(t1)) {
         return typeEquals(t0->pointer, t1->pointer)
             || t0->pointer->tag == TYPE_VOID
             || t1->pointer->tag == TYPE_VOID;
@@ -190,20 +205,45 @@ bool typeConvertable(const Type* from, const Type* into) {
 }
 
 bool isVoid(const Type* type) {
-    return type != NULL ? type->tag == TYPE_VOID : false;
+    return type != NULL && type->tag == TYPE_VOID;
 }
 
 bool isInteger(const Type* type) {
-    return type != NULL ? type->tag == TYPE_INTEGER : false;
+    return type != NULL && type->tag == TYPE_INTEGER;
 }
 
 bool isPointer(const Type* type) {
-    return type != NULL ? type->tag == TYPE_POINTER || type->tag == TYPE_ARRAY : false;
+    return type != NULL && (type->tag == TYPE_POINTER || type->tag == TYPE_ARRAY);
 }
 
-const Type* integerPromotion(const Type* t0, const Type* t1) {
-    ASSERT(t0 && t1, "cannot promote null type");
-    ASSERT(isInteger(t0) && isInteger(t1), "can only find the common type of integers");
+bool isArray(const Type* type) {
+    return type != NULL && type->tag == TYPE_ARRAY;
+}
+
+const Type* integerPromotion(Diagnostics* diag, const Type* t0, const Type* t1, Location location) {
+    if (t0 == NULL || t1 == NULL) {
+        return NULL;
+    }
+
+    if (isPointer(t0) && isPointer(t1)) {
+        if (isVoid(t0->pointer)) {
+            return t1;
+        }
+
+        if (isVoid(t1->pointer) || typeEquals(t0->pointer, t1->pointer)) {
+            return t0;
+        }
+    }
+
+    if (!isInteger(t0) || !isInteger(t1)) {
+        errorStart(diag, location);
+        fprintf(stderr, "cannot find common type of '");
+        typePrint(stderr, t0);
+        fprintf(stderr, "' and '");
+        typePrint(stderr, t1);
+        fprintf(stderr, "'\n");
+        return NULL;
+    }
 
     // If the integers are the same size, sign precedence goes: either < signed < unsigned
     if (t0->integer.size == t1->integer.size) {

@@ -6,6 +6,7 @@
 #include "mem.h"
 #include "type.h"
 #include "diag.h"
+#include <stdbool.h>
 
 typedef int Label;
 
@@ -20,6 +21,8 @@ typedef enum {
     EXPR_ASSIGN,
     EXPR_LABEL,
     EXPR_STACKOFFSET,
+    EXPR_SIZEOF,
+    EXPR_STRING,
 } ExpressionType;
 
 typedef enum {
@@ -32,6 +35,9 @@ typedef enum {
     BINARY_SHIFT_LEFT,
     BINARY_LOGICAL_OR,
     BINARY_LOGICAL_AND,
+    BINARY_BITWISE_OR,
+    BINARY_BITWISE_AND,
+    BINARY_BITWISE_XOR,
     BINARY_EQUAL,
     BINARY_NOT_EQUAL,
     BINARY_LESS,
@@ -89,6 +95,19 @@ typedef struct Expression {
                     int offset;
                 } stackOffset;
 
+                struct {
+                    bool hasType;
+                    union {
+                        const struct Expression* expr;
+                        const Type* type;
+                    };
+                } exprSizeOf;
+
+                struct {
+                    const char* data;
+                    int length;
+                } string;
+
                 int literal;
                 Label label;
             };
@@ -105,6 +124,9 @@ const Expression* exprVariable(Arena* arena, Identifier name);
 const Expression* exprLabel(Arena* arena, Label value, Location location);
 const Expression* exprStackOffset(Arena* arena, const Identifier* functionName, int offset, Location location);
 const Expression* exprFunctionCall(Arena* arena, const Expression* name, size_t argumentCount, const Expression** arguments, Position endPosition);
+const Expression* exprSizeofType(Arena* arena, const Type* type, Location location);
+const Expression* exprSizeofExpr(Arena* arena, const Expression* inner, Location location);
+const Expression* exprStringLiteral(Arena* arena, const char* data, int length, Location location);
 
 void exprPrint(FILE* file, const Expression* expr);
 
@@ -113,7 +135,11 @@ bool isLiteral(const Expression* expr);
 bool isStackOffset(const Expression* expr);
 bool exprEquals(const Expression* expr0, const Expression* expr1);
 
+bool getLiteral(const Expression* expr, int* val);
+
 Location exprLoc(const Expression* expr);
+
+bool exprIsCondition(const Expression* expr);
 
 #endif
 

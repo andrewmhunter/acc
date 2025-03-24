@@ -6,8 +6,8 @@
 
 typedef bool Invert;
 
-#define INVERT true
-#define MAINTAIN false
+#define INVERT ((Invert)true)
+#define MAINTAIN ((Invert)false)
 
 typedef enum {
     FLAG_ALWAYS,

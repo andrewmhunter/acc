@@ -19,6 +19,7 @@ struct ValuePart;
 typedef struct Value {
     ValueType kind;
     int partCount;
+    Location location;
     const Type* type;
     union {
         const Expression* expression;
@@ -160,7 +161,7 @@ Target targetValue(Value value);
 Target targetType(const Type* type);
 const Type* getTargetType(const Target* target);
 const Type* getTargetTypeOr(const Target* target, const Type* type);
-const Type* commonType(const Type* t0, const Type* t1, const Target* target);
+const Type* commonType(Diagnostics* diag, const Type* t0, const Type* t1, const Target* target, Location location);
 
 ConditionTarget conditionTarget(Value label, Invert invert);
 ConditionTarget invertConditionTarget(ConditionTarget target);
@@ -170,8 +171,9 @@ Opcode invertJump(Opcode opcode);
 Value valueImmediateExpr(const Type* type, const Expression* expr);
 Value valueConstant(Arena* arena, const Type* type, int literal, Location location);
 Value valueStackOffset(Arena* arena, const Type* type, const Identifier* functionName, int offset, Location location);
+Value valueStackOffsetImmediate(Arena* arena, const Type* type, const Identifier* functionName, int offset, Location location);
 Value valueDirectExpr(const Type* type, const Expression* expr);
-Value valueDiscard();
+Value valueDiscard(const Type* type);
 Value valueError();
 Value valueZero(const Type* type);
 Value valueMultipart(Arena* arena, const Type* type, const ValueList* parts);

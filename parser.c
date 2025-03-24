@@ -135,6 +135,8 @@ static bool nextIsType(Parser* parser) {
     switch (peek(parser)->kind) {
         case TOK_INT:
         case TOK_CHAR:
+        case TOK_LONG:
+        case TOK_INT24_T:
         case TOK_UNSIGNED:
         case TOK_VOID:
             return true;
@@ -156,6 +158,10 @@ static const Type* intType(Parser* parser) {
         size = SIZE_INT;
     } else if (match(parser, TOK_CHAR, NULL)) {
         size = SIZE_BYTE;
+    } else if (match(parser, TOK_INT24_T, NULL)) {
+        size = SIZE_24;
+    } else if (match(parser, TOK_LONG, NULL)) {
+        size = SIZE_LONG;
     }
 
     return typeInteger(parser->staticLifetime, sign, size);
@@ -166,6 +172,8 @@ static const Type* type(Parser* parser) {
     switch (peek(parser)->kind) {
         case TOK_INT:
         case TOK_CHAR:
+        case TOK_INT24_T:
+        case TOK_LONG:
         case TOK_UNSIGNED:
             type = intType(parser);
             break;
@@ -218,6 +226,53 @@ static int integerLiteral(Parser* parser, Token token) {
     return value;
 }
 
+static const Expression* parseString(Parser* parser, Token first) {
+    return exprStringLiteral(parser->staticLifetime, first.start + 1, first.length - 2, tokenLoc(&first));
+}
+
+static char unescapeCharacter(Diagnostics* diag, const char* from, Location location) {
+    if (from[0] != '\\') {
+        return from[0];
+    }
+
+    switch (from[1]) {
+        case 'n':
+            return '\n';
+        case 't':
+            return '\t';
+        case 'r':
+            return '\r';
+        case '0':
+            return '\0';
+        case '\\':
+            return '\\';
+        case '"':
+            return '"';
+        case '\'':
+            return '\'';
+    }
+
+    printWarning(diag, location, "unrecognized escape sequence '\\%c'", from[1]);
+    return from[1];
+}
+
+static const Expression* parseCharLiteral(Parser* parser, Token tok) {
+    int value = unescapeCharacter(parser->diag, tok.start + 1, tokenLoc(&tok));
+    return exprLiteral(parser->staticLifetime, value, tokenLoc(&tok));
+}
+
+static const Expression* parseSizeof(Parser* parser, Token tok) {
+    consume(parser, TOK_PAREN_LEFT, "expected '('");
+    if (nextIsType(parser)) {
+        const Type* ty = type(parser);
+        Location end = consume(parser, TOK_PAREN_RIGHT, "expected ')'");
+        return exprSizeofType(parser->staticLifetime, ty, locSpan(tokenLoc(&tok), end));
+    }
+    const Expression* expr = expression(parser);
+    Location end = consume(parser, TOK_PAREN_RIGHT, "expected ')'");
+    return exprSizeofExpr(parser->staticLifetime, expr, locSpan(tokenLoc(&tok), end));
+}
+
 static const Expression* primary(Parser* parser, bool parenthesized) {
     if (parenthesized) {
         const Expression* expr = expression(parser);
@@ -236,6 +291,15 @@ static const Expression* primary(Parser* parser, bool parenthesized) {
     }
     if (match(parser, TOK_IDENTIFIER, &tok)) {
         return exprVariable(parser->staticLifetime, makeIdentifier(tok));
+    }
+    if (match(parser, TOK_STRING, &tok)) {
+        return parseString(parser, tok);
+    }
+    if (match(parser, TOK_CHARLITERAL, &tok)) {
+        return parseCharLiteral(parser, tok);
+    }
+    if (match(parser, TOK_SIZEOF, &tok)) {
+        return parseSizeof(parser, tok);
     }
     errorAtNext(parser, "unexpected token");
     return NULL;
@@ -323,52 +387,57 @@ static const Expression* prefix(Parser* parser) {
         );
 }
 
-static const Expression* product(Parser* parser) {
-    const Expression* left = prefix(parser);
+static const Expression* leftAssociative1(Parser* parser,
+        TokenType tok, BinaryOperation op,
+        const Expression* (*inner)(Parser* parser)
+) {
+    const Expression* left = inner(parser);
+    while (match(parser, tok, NULL)) {
+        const Expression* right = inner(parser);
+        left = exprBinary(parser->staticLifetime, op, left, right);
+    }
+    return left;
+}
+
+static const Expression* leftAssociative2(Parser* parser,
+        TokenType tok0, BinaryOperation op0,
+        TokenType tok1, BinaryOperation op1,
+        const Expression* (*inner)(Parser* parser)
+) {
+    const Expression* left = inner(parser);
     for (;;) {
         BinaryOperation op;
-        if (match(parser, TOK_ASTERIX, NULL)) {
-            op = BINARY_MULTIPLY;
-        } else if (match(parser, TOK_SLASH, NULL)) {
-            op = BINARY_DIVIDE;
+        if (match(parser, tok0, NULL)) {
+            op = op0;
+        } else if (match(parser, tok1, NULL)) {
+            op = op1;
         } else {
             return left;
         }
-        const Expression* right = prefix(parser);
+        const Expression* right = inner(parser);
         left = exprBinary(parser->staticLifetime, op, left, right);
     }
+}
+
+static const Expression* product(Parser* parser) {
+    return leftAssociative2(parser,
+            TOK_ASTERIX, BINARY_MULTIPLY,
+            TOK_SLASH, BINARY_DIVIDE,
+            prefix);
 }
 
 static const Expression* sum(Parser* parser) {
-    const Expression* left = product(parser);
-    for (;;) {
-        BinaryOperation op;
-        if (match(parser, TOK_PLUS, NULL)) {
-            op = BINARY_ADD;
-        } else if (match(parser, TOK_MINUS, NULL)) {
-            op = BINARY_SUBTRACT;
-        } else {
-            return left;
-        }
-        const Expression* right = product(parser);
-        left = exprBinary(parser->staticLifetime, op, left, right);
-    }
+    return leftAssociative2(parser,
+            TOK_PLUS, BINARY_ADD,
+            TOK_MINUS, BINARY_SUBTRACT,
+            product);
 }
 
 static const Expression* bitshift(Parser* parser) {
-    const Expression* left = sum(parser);
-    for (;;) {
-        BinaryOperation op;
-        if (match(parser, TOK_LEFT_SHIFT, NULL)) {
-            op = BINARY_SHIFT_LEFT;
-        } else if (match(parser, TOK_RIGHT_SHIFT, NULL)) {
-            op = BINARY_SHIFT_RIGHT;
-        } else {
-            return left;
-        }
-        const Expression* right = sum(parser);
-        left = exprBinary(parser->staticLifetime, op, left, right);
-    }
+    return leftAssociative2(parser,
+            TOK_LEFT_SHIFT, BINARY_SHIFT_LEFT,
+            TOK_RIGHT_SHIFT, BINARY_SHIFT_RIGHT,
+            sum);
 }
 
 static const Expression* ordering(Parser* parser) {
@@ -392,47 +461,30 @@ static const Expression* ordering(Parser* parser) {
 }
 
 static const Expression* equal(Parser* parser) {
-    const Expression* left = ordering(parser);
-    for (;;) {
-        BinaryOperation op;
-        if (match(parser, TOK_EQUAL_EQUAL, NULL)) {
-            op = BINARY_EQUAL;
-        } else if (match(parser, TOK_NOT_EQUAL, NULL)) {
-            op = BINARY_NOT_EQUAL;
-        } else {
-            return left;
-        }
-        const Expression* right = ordering(parser);
-        left = exprBinary(parser->staticLifetime, op, left, right);
-    }
+    return leftAssociative2(parser,
+            TOK_EQUAL_EQUAL, BINARY_EQUAL,
+            TOK_NOT_EQUAL, BINARY_NOT_EQUAL,
+            ordering);
+}
+
+static const Expression* bitwiseAnd(Parser* parser) {
+    return leftAssociative1(parser, TOK_BIT_AND, BINARY_BITWISE_AND, equal);
+}
+
+static const Expression* bitwiseXor(Parser* parser) {
+    return leftAssociative1(parser, TOK_BIT_XOR, BINARY_BITWISE_XOR, bitwiseAnd);
+}
+
+static const Expression* bitwiseOr(Parser* parser) {
+    return leftAssociative1(parser, TOK_BIT_OR, BINARY_BITWISE_OR, bitwiseXor);
 }
 
 static const Expression* logicalAnd(Parser* parser) {
-    const Expression* left = equal(parser);
-    for (;;) {
-        BinaryOperation op;
-        if (match(parser, TOK_LOG_AND, NULL)) {
-            op = BINARY_LOGICAL_AND;
-        } else {
-            return left;
-        }
-        const Expression* right = equal(parser);
-        left = exprBinary(parser->staticLifetime, op, left, right);
-    }
+    return leftAssociative1(parser, TOK_LOG_AND, BINARY_LOGICAL_AND, bitwiseOr);
 }
 
 static const Expression* logicalOr(Parser* parser) {
-    const Expression* left = logicalAnd(parser);
-    for (;;) {
-        BinaryOperation op;
-        if (match(parser, TOK_LOG_OR, NULL)) {
-            op = BINARY_LOGICAL_OR;
-        } else {
-            return left;
-        }
-        const Expression* right = logicalAnd(parser);
-        left = exprBinary(parser->staticLifetime, op, left, right);
-    }
+    return leftAssociative1(parser, TOK_LOG_OR, BINARY_LOGICAL_OR, logicalAnd);
 }
 
 static const Expression* assignment(Parser* parser) {
@@ -475,19 +527,53 @@ static Statement* whileLoop(Parser* parser, Location startLoc) {
     Statement* stmt = stmtNew(STATEMENT_WHILE, locSpan(startLoc, endLoc));
     stmt->whileLoop.condition = condition;
     stmt->whileLoop.inner = inner;
-    stmt->whileLoop.isDoWhile = false;
     return stmt;
+}
+
+static Statement* doWhileLoop(Parser* parser, Location startLocation) {
+    Statement* inner = statement(parser);
+    consume(parser, TOK_WHILE, "expected 'while'");
+    consume(parser, TOK_PAREN_LEFT, "expected '('");
+    const Expression* condition = expression(parser);
+    consume(parser, TOK_PAREN_RIGHT, "expected ')'");
+    Location endLocation = consume(parser, TOK_SEMICOLON, "expected ';'");
+
+    Statement* stmt = stmtNew(STATEMENT_DO_WHILE, locSpan(startLocation, endLocation));
+    stmt->whileLoop.inner = inner;
+    stmt->whileLoop.condition = condition;
+    return stmt;
+}
+
+static void typeIdent(Parser* parser, const Type** typeOut, Identifier* ident) {
+    *typeOut = type(parser);
+    *ident = identifier(parser);
+
+    while (match(parser, TOK_SQUARE_LEFT, NULL)) {
+        const Expression* expr = expression(parser);
+
+        int length = 0;
+        if (getLiteral(expr, &length)) {
+            *typeOut = typeArray(parser->staticLifetime, *typeOut, length);
+        } else {
+            errorAtNext(parser, "array length must be literal");
+        }
+
+        consume(parser, TOK_SQUARE_RIGHT, NULL);
+    }
 }
 
 static Statement* variableDeclaration(Parser* parser, Location identLocation) {
     Statement* stmt = stmtNew(STATEMENT_VARIABLE, identLocation);
-    stmt->variableDeclaration.type = type(parser);
+
+    typeIdent(parser, &stmt->variableDeclaration.type, &stmt->variableDeclaration.id);
+
+    /*stmt->variableDeclaration.type = type(parser);
 
     if (!nextIs(parser, TOK_IDENTIFIER)) {
         errorAtNext(parser, "expected identifier");
         return NULL;
     }
-    stmt->variableDeclaration.id = makeIdentifier(next(parser));
+    stmt->variableDeclaration.id = makeIdentifier(next(parser));*/
     
     stmt->variableDeclaration.expr = NULL;
     if (match(parser, TOK_EQUAL, NULL)) {
@@ -534,6 +620,44 @@ static Statement* parseReturn(Parser* parser, Location startLocation) {
     return stmt;
 }
 
+static Statement* parseFor(Parser* parser, Location startLocation) {
+    consume(parser, TOK_PAREN_LEFT, "expectd '('");
+
+    Statement* stmt = stmtNew(STATEMENT_FOR, startLocation);
+
+    stmt->forLoop.first = NULL;
+    if (!nextIs(parser, TOK_SEMICOLON)) {
+        stmt->forLoop.first = statement(parser);
+    } else {
+        consume(parser, TOK_SEMICOLON, "");
+    }
+
+    stmt->forLoop.second = NULL;
+    if (!nextIs(parser, TOK_SEMICOLON)) {
+        stmt->forLoop.second = expression(parser);
+    }
+    consume(parser, TOK_SEMICOLON, "expected ';'");
+
+    stmt->forLoop.third = NULL;
+    if (!nextIs(parser, TOK_PAREN_RIGHT)) {
+        stmt->forLoop.third = expression(parser);
+    }
+    consume(parser, TOK_PAREN_RIGHT, "expected ')'");
+
+    stmt->forLoop.fourth = statement(parser);
+    return stmt;
+}
+
+static Statement* parseBreak(Parser* parser, Location startLocation) {
+    consume(parser, TOK_SEMICOLON, "expected ';'");
+    return stmtNew(STATEMENT_BREAK, startLocation);
+}
+
+static Statement* parseContinue(Parser* parser, Location startLocation) {
+    consume(parser, TOK_SEMICOLON, "expected ';'");
+    return stmtNew(STATEMENT_CONTINUE, startLocation);
+}
+
 Statement* statement(Parser* parser) {
     Location startLocation = tokenLoc(peek(parser));
 
@@ -547,14 +671,26 @@ Statement* statement(Parser* parser) {
         return block(parser, startLocation);
     } else if (match(parser, TOK_RETURN, NULL)) {
         return parseReturn(parser, startLocation);
+    } else if (match(parser, TOK_FOR, NULL)) {
+        return parseFor(parser, startLocation);
+    } else if (match(parser, TOK_DO, NULL)) {
+        return doWhileLoop(parser, startLocation);
+    } else if (match(parser, TOK_BREAK, NULL)) {
+        return parseBreak(parser, startLocation);
+    } else if (match(parser, TOK_CONTINUE, NULL)) {
+        return parseContinue(parser, startLocation);
     }
     return expressionStatement(parser);
 }
 
 Declaration* parseDeclaration(Parser* parser) {
     Location startLoc = tokenLoc(peek(parser));
-    const Type* ty = type(parser);
-    Identifier name = identifier(parser);
+
+    //const Type* ty = type(parser);
+    //Identifier name = identifier(parser);
+    const Type* ty = NULL;
+    Identifier name;
+    typeIdent(parser, &ty, &name);
 
     /*if (match(parser, TOK_SQUARE_LEFT, NULL)) {
         const Expression* length = expression(parser);

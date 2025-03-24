@@ -12,9 +12,13 @@ typedef enum {
     STATEMENT_EXPRESSION,
     STATEMENT_IF,
     STATEMENT_WHILE,
+    STATEMENT_DO_WHILE,
     STATEMENT_BLOCK,
     STATEMENT_VARIABLE,
     STATEMENT_RETURN,
+    STATEMENT_FOR,
+    STATEMENT_BREAK,
+    STATEMENT_CONTINUE,
 } StatementType;
 
 struct Statement;
@@ -38,8 +42,13 @@ typedef struct Statement {
         struct {
             const Expression* condition;
             struct Statement* inner;
-            bool isDoWhile;
         } whileLoop;
+        struct {
+            struct Statement* first;
+            const Expression* second;
+            const Expression* third;
+            struct Statement* fourth;
+        } forLoop;
         struct {
             const Type* type;
             Identifier id;

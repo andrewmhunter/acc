@@ -16,9 +16,6 @@ void stmtFree(Statement* stmt) {
     }
 
     switch (stmt->type) {
-        case STATEMENT_RETURN:
-        case STATEMENT_EXPRESSION:
-            break;
         case STATEMENT_IF:
             stmtFree(stmt->conditional.inner);
             stmtFree(stmt->conditional.onElse);
@@ -27,8 +24,17 @@ void stmtFree(Statement* stmt) {
             stmtListFree(&stmt->block);
             break;
         case STATEMENT_WHILE:
+        case STATEMENT_DO_WHILE:
             stmtFree(stmt->whileLoop.inner);
             break;
+        case STATEMENT_FOR:
+            stmtFree(stmt->forLoop.first);
+            stmtFree(stmt->forLoop.fourth);
+            break;
+        case STATEMENT_BREAK:
+        case STATEMENT_CONTINUE:
+        case STATEMENT_RETURN:
+        case STATEMENT_EXPRESSION:
         case STATEMENT_VARIABLE:
             break;
     }
@@ -84,6 +90,10 @@ void stmtPrint(FILE* file, const Statement* stmt, int depth, bool firstLine) {
 
             stmtPrint(file, stmt->whileLoop.inner, depth - 1, firstLine);
             break;
+        //case STATEMENT_DO_WHILE:
+        //    fprintf(file, "do");
+
+        //    break;
         case STATEMENT_BLOCK:
             fprintf(file, "{\n");
 
@@ -106,6 +116,15 @@ void stmtPrint(FILE* file, const Statement* stmt, int depth, bool firstLine) {
                 exprPrint(file, stmt->variableDeclaration.expr);
             }
             fprintf(file, ";");
+            break;
+        case STATEMENT_FOR:
+            fprintf(file, "for ()");
+            break;
+        case STATEMENT_BREAK:
+            fprintf(file, "break;");
+            break;
+        case STATEMENT_CONTINUE:
+            fprintf(file, "continue;");
             break;
     }
     fprintf(file, "\n");

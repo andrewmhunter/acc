@@ -101,7 +101,7 @@ static void applyNotEqual(
     Value left = compileExpression(func, lhs, ANY_TARGET);
     Value right = compileExpression(func, rhs, ANY_TARGET);
 
-    const Type* common = integerPromotion(left.type, right.type);
+    const Type* common = integerPromotion(func->diag, left.type, right.type, locSpan(exprLoc(lhs), exprLoc(rhs)));
     left = moveValueToTarget(func, left, targetType(common));
     right = moveValueToTarget(func, right, targetType(common));
 
@@ -112,7 +112,7 @@ static void applyNotEqual(
 
     for (int i = 1; i < size; ++i) {
         load(func, REG_A, left, i);
-        emitRegValue(func, INS_SUBB, REG_A, left, i);
+        emitRegValue(func, INS_SUBB, REG_A, right, i);
         applyCondition(func, CONDITION_NZ, target);
     }
 }
@@ -126,7 +126,7 @@ static void applyEqual(
     Value left = compileExpression(func, lhs, ANY_TARGET);
     Value right = compileExpression(func, rhs, ANY_TARGET);
 
-    const Type* common = integerPromotion(left.type, right.type);
+    const Type* common = integerPromotion(func->diag, left.type, right.type, locSpan(exprLoc(lhs), exprLoc(rhs)));
     left = moveValueToTarget(func, left, targetType(common));
     right = moveValueToTarget(func, right, targetType(common));
 
@@ -185,7 +185,7 @@ static void ordering(
         right = swap;
     }
 
-    const Type* common = integerPromotion(left.type, right.type);
+    const Type* common = integerPromotion(func->diag, left.type, right.type, locSpan(exprLoc(lhs), exprLoc(rhs)));
     left = moveValueToTarget(func, left, targetType(common));
     right = moveValueToTarget(func, right, targetType(common));
 
@@ -272,6 +272,7 @@ void compileCondition(
         case EXPR_UNARY:
             compileUnaryCondition(func, expr, target);
             break;
+        case EXPR_STRING:
         case EXPR_CAST:
         case EXPR_ASSIGN:
         case EXPR_LABEL:
@@ -279,6 +280,7 @@ void compileCondition(
         case EXPR_STACKOFFSET:
         case EXPR_VARIABLE:
         case EXPR_CALL:
+        case EXPR_SIZEOF:
             standardCompileCondition(func, expr, target);
             break;
     }

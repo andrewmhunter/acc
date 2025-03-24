@@ -21,6 +21,14 @@ void optimReplace(Instruction* ins, const Instruction replacement) {
     *ins = replacement;
 }
 
+void optimInsertBefore(Optimizer* optim, Instruction* ins, const Instruction toInsert) {
+    insertInstruction(optim->func, toInsert, ins - optim->func->instructions);
+}
+
+void optimInsertAfter(Optimizer* optim, Instruction* ins, const Instruction toInsert) {
+    insertInstruction(optim->func, toInsert, ins - optim->func->instructions + 1);
+}
+
 static Optimizer optimNew(Arena* arena, Function* func, int optimizationLevel) {
     return (Optimizer) {
         .arena = arena,
@@ -120,7 +128,7 @@ void optimizeFunction(Arena* arena, Function* func, int optimizationLevel) {
     if (optimizationLevel <= 0) {
         return;
     }
-
+    
     do {
 #ifdef LOG_OPTIMIZER
     fprintf(stderr, "OPT: Optimizing %.*s\n",

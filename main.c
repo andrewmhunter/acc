@@ -110,7 +110,7 @@ int main(int argc, char** argv) {
     Arena staticLifetime = arenaNew();
     Diagnostics diag = newDiagnostics(defaultFilename, text);
 
-    Scanner scan = newScanner(text);
+    Scanner scan = newScanner(&diag, text);
     Parser parser = newParser(&staticLifetime, &diag, scan);
 
     Program program = parseProgram(&parser);

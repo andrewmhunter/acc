@@ -5,10 +5,23 @@
 #include "condition.h"
 #include "match.h"
 #include <stdio.h>
+#include <string.h>
 
 /// ############################################################################
 /// Initalizers
 /// ############################################################################
+
+static void stringLiteralHash(Hash* hash, const void* stringLiteral) {
+    const StringLiteral* sl = stringLiteral;
+    hashBytesSized(hash, sl->data, sl->length);
+}
+
+static bool stringLiteralEquals(const void* string0, const void* string1) {
+    const StringLiteral* sl0 = string0;
+    const StringLiteral* sl1 = string1;
+
+    return sl0->length == sl1->length && memcmp(sl0->data, sl1->data, sl0->length) == 0;
+}
 
 Compiler compilerNew(Arena* staticLifetime, Diagnostics* diag, Declaration* const* declarations, int optimizationLevel) {
     return (Compiler) {
@@ -18,6 +31,7 @@ Compiler compilerNew(Arena* staticLifetime, Diagnostics* diag, Declaration* cons
         .globalCount = 0,
         .globals = declarations,
         .optimizationLevel = optimizationLevel,
+        .strings = setNew(stringLiteralHash, stringLiteralEquals),
     };
 }
 
@@ -36,6 +50,9 @@ Function* functionNew(Arena* arena, Compiler* compiler, const FunctionDeclaratio
         .stackCapacity = 0,
         .currentStackSize = 0,
         .maxStackSize = 0,
+        .breakContinueStack = NULL,
+        .breakContinueLength = 0,
+        .breakContinueCapacity = 0,
         .scopeDepth = 0,
         .nextFunction = NULL,
     };
@@ -46,7 +63,16 @@ Function* functionNew(Arena* arena, Compiler* compiler, const FunctionDeclaratio
 /// Instruction generation
 /// ############################################################################
 
-static void appendInstruction(Function* func, Instruction instruction) {
+void insertInstruction(Function* func, Instruction instruction, size_t index) {
+    func->instructions = EXTEND_ARRAY(NULL, func->instructions, Instruction, &func->instructionsCapacity, func->instructionsLength, 1);
+    for (size_t i = func->instructionsLength - 1; i >= index; ++i) {
+        func->instructions[i + 1] = func->instructions[i];
+    }
+    func->instructionsLength++;
+    func->instructions[index] = instruction;
+}
+
+void appendInstruction(Function* func, Instruction instruction) {
     //printInstruction(stdout, &instruction);
     APPEND_ARRAY(
         NULL,
@@ -184,7 +210,7 @@ Value createLabel(Compiler* compiler) {
     return valueImmediateExpr(&typeAnyInt, exprLabel(compiler->lifetime, label, NO_LOCATION));
 }
 
-static Value pushStackLocation(Function* func, const Type* type, Identifier ident, Location loc) {
+Value pushStackValue(Function* func, Value value, Identifier ident) {
     func->stack = EXTEND_ARRAY(
         func->lifetime,
         func->stack,
@@ -197,12 +223,19 @@ static Value pushStackLocation(Function* func, const Type* type, Identifier iden
 
     StackElement* element = &func->stack[func->stackLength++];
     *element = (StackElement) {
-        .type = type,
+        .value = value,
         .ident = ident,
         .depth = func->scopeDepth,
         .offset = offset,
     };
 
+    return value;
+}
+
+static Value pushStackLocation(Function* func, const Type* type, Identifier ident, Location loc) {
+    size_t offset = func->currentStackSize;
+    Value value = valueStackOffset(func->lifetime, type, &func->decl->name, offset, loc);
+    value = pushStackValue(func, value, ident);
     func->currentStackSize += typeSize(type);
     func->maxStackSize = MAX(func->maxStackSize, func->currentStackSize);
 
@@ -210,23 +243,42 @@ static Value pushStackLocation(Function* func, const Type* type, Identifier iden
     emitCommentAllocation(func, ident, offset, typeSize(type));
 #endif
 
-    return valueStackOffset(func->lifetime, type, &func->decl->name, offset, loc);
+    return value;
+}
+
+Value pushStackArray(Function* func, const Type* type, Identifier ident) {
+    size_t offset = func->currentStackSize;
+    Value value = valueStackOffsetImmediate(func->lifetime, type, &func->decl->name, offset, identLoc(&ident));
+    value = pushStackValue(func, value, ident);
+    func->currentStackSize += typeSize(type);
+    func->maxStackSize = MAX(func->maxStackSize, func->currentStackSize);
+
+#ifdef PRINT_ALLOCATIONS
+    emitCommentAllocation(func, ident, offset, typeSize(type));
+#endif
+
+    return value;
 }
 
 Value pushStack(Function* func, const Type* type, Identifier ident) {
+    if (isArray(type)) {
+        return pushStackArray(func, type, ident);
+    }
     return pushStackLocation(func, type, ident, identLoc(&ident));
 }
 
 Value pushStackAnon(Function* func, const Type* type, Location loc) {
+    ASSERT(!isArray(type), "anonymous arrays are not allowed");
     Identifier id = {.start = NULL, .length = 0};
     return pushStackLocation(func, type, id, loc);
 }
 
 void popStack(Function* func) {
     StackElement* element = &func->stack[func->stackLength - 1];
-    func->currentStackSize -= typeSize(element->type);
+    func->currentStackSize = element->offset;
     --func->stackLength;
 
+    // TODO: ERROR: Won't work because of unsigned integers.
     ASSERT(func->stackLength >= 0 && func->currentStackSize >= 0, "stack empty");
 }
 
@@ -289,6 +341,21 @@ void leaveScope(Function* func) {
     }
 }
 
+void pushBreakContinue(Function* func, Value breakValue, Value continueValue, bool hasContinue) {
+    BreakContinue bc = {
+        .breakValue = breakValue,
+        .continueValue = continueValue,
+        .hasContinue = hasContinue
+    };
+
+    APPEND_ARRAY(func->lifetime, func->breakContinueStack, BreakContinue, func->breakContinueCapacity, func->breakContinueLength, bc);
+}
+
+void popBreakContinue(Function* func) {
+    ASSERT(func->breakContinueLength > 0, "pop on empty break-continue stack ");
+    --func->breakContinueLength;
+}
+
 const Declaration* lookupGlobal(Compiler* compiler, Identifier ident) {
     for (int i = 0; i < compiler->globalCount; ++i) {
         const Declaration* decl = compiler->globals[i];
@@ -302,13 +369,7 @@ const Declaration* lookupGlobal(Compiler* compiler, Identifier ident) {
 Value lookupSymbol(Function* func, Identifier ident) {
     for (int i = func->stackLength - 1; i >= 0; --i) {
         if (identEquals(&ident, &func->stack[i].ident)) {
-            return valueStackOffset(
-                    func->lifetime,
-                    func->stack[i].type,
-                    &func->decl->name,
-                    func->stack[i].offset,
-                    identLoc(&ident)
-                );
+            return func->stack[i].value;
         }
     }
 
@@ -328,6 +389,9 @@ Value lookupSymbol(Function* func, Identifier ident) {
         return valueError();
     }
 
+    if (isArray(decl->type)) {
+        return valueImmediateExpr(decl->variable.type, exprVariable(func->lifetime, ident));
+    }
     return valueDirectExpr(decl->variable.type, exprVariable(func->lifetime, ident));
 }
 
@@ -359,5 +423,33 @@ void printFunction(FILE* file, const Function* func) {
 
     fprintf(file, "variable _Stack_%.*s %lu\n", decl->name.length, decl->name.start, func->maxStackSize);
     fprintf(file, "\n; Instruction count: %d\n\n", insCount);
+}
+
+Value internString(Compiler* compiler, const char* data, int length) {
+    StringLiteral string = {
+        .data = data,
+        .length = length,
+    };
+
+    if (setHas(&compiler->strings, &string)) {
+        StringLiteral* interned = setGet(&compiler->strings, &string);
+        return interned->label;
+    }
+
+    StringLiteral* allocated = ARENA_ALLOC(compiler->lifetime, StringLiteral);
+    *allocated = string;
+    allocated->label = createLabel(compiler);
+    allocated->label.type = typePointer(compiler->lifetime, &typeChar);
+    setInsert(&compiler->strings, allocated);
+    return allocated->label;
+}
+
+void emitInternedStrings(Compiler* compiler) {
+    Entry* entry = NULL;
+    while ((entry = setIterate(&compiler->strings, entry))) {
+        StringLiteral* string = entry->data;
+        printValue(stdout, &string->label);
+        fprintf(stdout, ":\n    data \"%.*s\\0\"\n", string->length, string->data);
+    }
 }
 

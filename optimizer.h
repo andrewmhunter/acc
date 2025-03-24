@@ -7,7 +7,7 @@
 #include <stdbool.h>
 
 #define LOG_OPTIMIZER
-#define MAX_OPTIMIZATION_PASSES 1024
+#define MAX_OPTIMIZATION_PASSES 128
 #define DEFAULT_OPTIMIZATION_LEVEL 0
 
 typedef struct Optimizer {
@@ -25,6 +25,8 @@ void optimizeFunction(Arena* arena, Function* program, int optimizationLevel);
 void optimDelete(Instruction* ins);
 void optimDeleteAll(InsSpan* span);
 void optimReplace(Instruction* ins, const Instruction replacement);
+void optimInsertBefore(Optimizer* optim, Instruction* ins, const Instruction toInsert);
+void optimInsertAfter(Optimizer* optim, Instruction* ins, const Instruction toInsert);
 
 #endif
 

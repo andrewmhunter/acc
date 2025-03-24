@@ -61,11 +61,31 @@ static void compileWhile(Function* func, const Statement* stmt) {
     Value loopLabel = createLabel(func->compiler);
     Value endLabel = createLabel(func->compiler);
 
+    pushBreakContinue(func, endLabel, loopLabel, true);
+
     emitLabel(func, loopLabel);
     compileCondition(func, stmt->whileLoop.condition, conditionTarget(endLabel, INVERT));
     compileStatement(func, stmt->whileLoop.inner);
     emitJump(func, loopLabel);
     emitLabel(func, endLabel);
+
+    popBreakContinue(func);
+}
+
+static void compileDoWhile(Function* func, const Statement* stmt) {
+    Value loopLabel = createLabel(func->compiler);
+    Value endLabel = createLabel(func->compiler);
+    Value continueLabel = createLabel(func->compiler);
+
+    pushBreakContinue(func, endLabel, continueLabel, true);
+
+    emitLabel(func, loopLabel);
+    compileStatement(func, stmt->whileLoop.inner);
+    emitLabel(func, continueLabel);
+    compileCondition(func, stmt->whileLoop.condition, conditionTarget(loopLabel, MAINTAIN));
+    emitLabel(func, endLabel);
+
+    popBreakContinue(func);
 }
 
 static void compileReturn(Function* func, const Expression* expr, Location loc) {
@@ -86,6 +106,59 @@ static void compileReturn(Function* func, const Expression* expr, Location loc) 
     Value rvalue = getFuncReturnValue(func->lifetime, func->decl, NO_LOCATION);
     compileExpression(func, expr, targetValue(rvalue));
     emitImplied(func, INS_RET);
+}
+
+static void compileFor(Function* func, const Statement* stmt) {
+    enterScope(func);
+
+    Value loopLabel = createLabel(func->compiler);
+    Value endLabel = createLabel(func->compiler);
+    Value continueLabel = stmt->forLoop.third != NULL ? createLabel(func->compiler) : loopLabel;
+
+    pushBreakContinue(func, endLabel, continueLabel, true);
+
+    if (stmt->forLoop.first != NULL) {
+        compileStatement(func, stmt->forLoop.first);
+    }
+
+    emitLabel(func, loopLabel);
+    if (stmt->forLoop.second != NULL) {
+        compileCondition(func, stmt->forLoop.second, conditionTarget(endLabel, INVERT));
+    }
+
+    compileStatement(func, stmt->forLoop.fourth);
+    if (stmt->forLoop.third != NULL) {
+        emitLabel(func, continueLabel);
+        compileExpression(func, stmt->forLoop.third, DISCARD_TARGET);
+    }
+
+    emitJump(func, loopLabel);
+    emitLabel(func, endLabel);
+
+    popBreakContinue(func);
+    leaveScope(func);
+}
+
+static void compileBreak(Function* func, Location location) {
+    if (func->breakContinueLength <= 0) {
+        printError(func->diag, location, "can only break from loop or switch statement");
+        return;
+    }
+
+    Value breakValue
+        = func->breakContinueStack[func->breakContinueLength - 1].breakValue;
+    emitJump(func, breakValue);
+}
+
+static void compileContinue(Function* func, Location location) {
+    for (long i = (long)func->breakContinueLength - 1; i >= 0; --i) {
+        if (func->breakContinueStack[i].hasContinue) {
+            Value continueValue = func->breakContinueStack[i].continueValue;
+            emitJump(func, continueValue);
+            return;
+        }
+    }
+    printError(func->diag, location, "can only continue within loop");
 }
 
 static void compileStatement(Function* func, const Statement* stmt) {
@@ -120,8 +193,20 @@ static void compileStatement(Function* func, const Statement* stmt) {
         case STATEMENT_WHILE:
             compileWhile(func, stmt);
             break;
+        case STATEMENT_DO_WHILE:
+            compileDoWhile(func, stmt);
+            break;
         case STATEMENT_RETURN:
             compileReturn(func, stmt->expression, stmtLoc(stmt));
+            break;
+        case STATEMENT_FOR:
+            compileFor(func, stmt);
+            break;
+        case STATEMENT_BREAK:
+            compileBreak(func, stmtLoc(stmt));
+            break;
+        case STATEMENT_CONTINUE:
+            compileContinue(func, stmtLoc(stmt));
             break;
     }
 }
@@ -263,6 +348,8 @@ void compileProgram(Compiler* compiler, const Program* program) {
                 break;
         }
     }
+
+    emitInternedStrings(compiler);
 
     const char mainName[] = "main";
     Identifier mainId = {.start = mainName, .length = strlen(mainName), .position = -1};

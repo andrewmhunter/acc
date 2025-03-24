@@ -4,6 +4,7 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include "mem.h"
+#include "diag.h"
 
 #define WORD_SIZE 2
 
@@ -24,6 +25,8 @@ typedef enum {
     SIZE_ANY = 0,
     SIZE_BYTE = 1,
     SIZE_INT = 2,
+    SIZE_24 = 3,
+    SIZE_LONG = 4,
 } IntegerSize;
 
 typedef struct Type {
@@ -59,7 +62,8 @@ bool typeConvertable(const Type* from, const Type* into);
 bool isInteger(const Type* type);
 bool isPointer(const Type* type);
 bool isVoid(const Type* type);
-const Type* integerPromotion(const Type* t0, const Type* t1);
+bool isArray(const Type* type);
+const Type* integerPromotion(Diagnostics* diag, const Type* t0, const Type* t1, Location location);
 
 extern const Type typeInt;
 extern const Type typeUInt;
@@ -67,6 +71,7 @@ extern const Type typeChar;
 extern const Type typeUChar;
 extern const Type typeAnyInt;
 extern const Type typeVoid;
+extern const Type typeBool;
 
 #endif
 

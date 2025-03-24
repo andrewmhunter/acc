@@ -3,8 +3,8 @@
 #include <string.h>
 #include <ctype.h>
 
-Scanner newScanner(const char* text) {
-    Scanner scan = {.textStart = text, .tokenStart = text, .tokenEnd = text};
+Scanner newScanner(Diagnostics* diag, const char* text) {
+    Scanner scan = {.diag = diag, .textStart = text, .tokenStart = text, .tokenEnd = text};
     return scan;
 }
 
@@ -25,10 +25,15 @@ static Token makeErrorLength(Scanner* scan, const char* message, size_t length) 
         .kind = TOK_ERROR,
         .start = message,
         .length = length,
+        .position = scan->tokenStart - scan->textStart,
     };
     scan->tokenStart = scan->tokenEnd;
     scan->tokenEnd = scan->tokenStart;
     return token;
+}
+
+static Token makeErrorCurrent(Scanner* scan) {
+    return makeErrorLength(scan, scan->tokenStart, scan->tokenEnd - scan->tokenStart);
 }
 
 static Token makeError(Scanner* scan, const char* message) {
@@ -103,22 +108,46 @@ static TokenType compareKeyword(
 
 static TokenType identifierType(Scanner* scan) {
     switch (scan->tokenStart[0]) {
+        case 'b':
+            return compareKeyword(scan, 1, 4, "reak", TOK_BREAK);
         case 'c':
-            return compareKeyword(scan, 1, 3, "har", TOK_CHAR);
+            switch (scan->tokenStart[1]) {
+                case 'h':
+                    return compareKeyword(scan, 2, 2, "ar", TOK_CHAR);
+                case 'o':
+                    return compareKeyword(scan, 2, 6, "ntinue", TOK_CONTINUE);
+            }
+            break;
         case 'd':
             return compareKeyword(scan, 1, 1, "o", TOK_DO);
         case 'e':
             return compareKeyword(scan, 1, 3, "lse", TOK_ELSE);
+        case 'f':
+            return compareKeyword(scan, 1, 2, "or", TOK_FOR);
+        case 'g':
+            return compareKeyword(scan, 1, 3, "oto", TOK_GOTO);
         case 'i':
             switch (scan->tokenStart[1]) {
                 case 'f':
                     return compareKeyword(scan, 2, 0, "", TOK_IF);
                 case 'n':
-                    return compareKeyword(scan, 2, 1, "t", TOK_INT);
+                    if (scan->tokenStart[2] == 't') {
+                        if (scan->tokenStart[3] == '2') {
+                            return compareKeyword(scan, 4, 3, "4_t", TOK_INT24_T);
+                        }
+                        return compareKeyword(scan, 3, 0, "", TOK_INT);
+                    }
+                    break;
             }
             break;
+        case 'I':
+            return compareKeyword(scan, 1, 10, "NCLUDE_ASM", TOK_INCLUDE_ASM);
+        case 'l':
+            return compareKeyword(scan, 1, 3, "ong", TOK_LONG);
         case 'r':
             return compareKeyword(scan, 1, 5, "eturn", TOK_RETURN);
+        case 's':
+            return compareKeyword(scan, 1, 5, "izeof", TOK_SIZEOF);
         case 'u':
             return compareKeyword(scan, 1, 7, "nsigned", TOK_UNSIGNED);
         case 'v':
@@ -136,6 +165,42 @@ static Token identifier(Scanner* scan) {
         nextChar(scan);
     }
     return makeToken(scan, identifierType(scan));
+}
+
+static Token stringLiteral(Scanner* scan) {
+    bool escaped = false;
+    for (;;) {
+        char next = peek(scan);
+        if (next == '\0' || next == '\n') {
+            printError(scan->diag, NO_LOCATION, "unterminated string literal");
+            return makeErrorCurrent(scan);
+        }
+
+        nextChar(scan);
+
+        if (next == '"' && !escaped) {
+            return makeToken(scan, TOK_STRING);
+        }
+
+        escaped = next == '\\' && !escaped;
+    }
+}
+
+static Token charLiteral(Scanner* scan) {
+    char next = nextChar(scan);
+    if (next == '\\') {
+        next = nextChar(scan);
+    } else if (next == '\'') {
+        printError(scan->diag, NO_LOCATION, "empty character literal");
+        return makeErrorCurrent(scan);
+    }
+
+    if (next == '\0' || next == '\n' || nextChar(scan) != '\'') {
+        printError(scan->diag, NO_LOCATION, "unterminated character literal");
+        return makeErrorCurrent(scan);
+    }
+
+    return makeToken(scan, TOK_CHARLITERAL);
 }
 
 static void skipChar(Scanner* scan) {
@@ -219,8 +284,14 @@ Token nextToken(Scanner* scan) {
     }
 
     switch (nextChar(scan)) {
+        case '"':
+            return stringLiteral(scan);
+        case '\'':
+            return charLiteral(scan);
         case ';':
             return makeToken(scan, TOK_SEMICOLON);
+        case ':':
+            return makeToken(scan, TOK_COLON);
         case ',':
             return makeToken(scan, TOK_COMMA);
         case '+':
@@ -231,6 +302,8 @@ Token nextToken(Scanner* scan) {
             return makeToken(scan, TOK_ASTERIX);
         case '/':
             return makeToken(scan, TOK_SLASH);
+        case '^':
+            return makeToken(scan, TOK_BIT_XOR);
         case '(':
             return makeToken(scan, TOK_PAREN_LEFT);
         case ')':

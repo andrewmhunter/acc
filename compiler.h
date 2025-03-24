@@ -8,17 +8,23 @@
 
 #include <stdlib.h>
 #include "instruction.h"
-//#include "hash.h"
+#include "hash.h"
 #include "statement.h"
 #include "diag.h"
 
 typedef struct {
-    const Type* type;
-    // Value value;
+    //const Type* type;
+    Value value;
     Identifier ident;
     int depth;
     int offset;
 } StackElement;
+
+typedef struct {
+    Value breakValue;
+    bool hasContinue;
+    Value continueValue;
+} BreakContinue;
 
 struct Compiler;
 
@@ -35,6 +41,9 @@ typedef struct Function {
     size_t stackCapacity;
     size_t currentStackSize;
     size_t maxStackSize;
+    BreakContinue* breakContinueStack;
+    size_t breakContinueLength;
+    size_t breakContinueCapacity;
     int scopeDepth;
     struct Function* nextFunction;
 } Function;
@@ -44,6 +53,12 @@ typedef struct {
     Declaration* decl;
 } Global;
 
+typedef struct {
+    const char* data;
+    int length;
+    Value label;
+} StringLiteral;
+
 typedef struct Compiler {
     Arena* lifetime;
     Diagnostics* diag;
@@ -51,10 +66,14 @@ typedef struct Compiler {
     int globalCount;
     Declaration* const* globals;
     int optimizationLevel;
+    Set strings;
 } Compiler;
 
 Compiler compilerNew(Arena* staticLifetime, Diagnostics* diag, Declaration* const* declarations, int optimizationLevel);
 Function* functionNew(Arena* arena, Compiler* compiler, const FunctionDeclaration* decl);
+
+void insertInstruction(Function* func, Instruction instruction, size_t index);
+void appendInstruction(Function* func, Instruction instruction);
 
 void printFunction(FILE* file, const Function* func);
 
@@ -80,8 +99,10 @@ void transfer(Function* func, Reg dest, Reg src);
 
 Value createLabel(Compiler* compiler);
 
+Value pushStackValue(Function* func, Value value, Identifier ident);
 Value pushStack(Function* func, const Type* type, Identifier ident);
 Value pushStackAnon(Function* func, const Type* type, Location location);
+Value pushStackArray(Function* func, const Type* type, Identifier ident);
 void popStack(Function* func);
 
 void emitJump(Function* func, Value value);
@@ -90,10 +111,16 @@ void conditionalJump(Function* func, Condition condition, Value value);
 void enterScope(Function* func);
 void leaveScope(Function* func);
 
+void pushBreakContinue(Function* func, Value breakValue, Value continueValue, bool hasContinue);
+void popBreakContinue(Function* func);
+
 const Declaration* lookupGlobal(Compiler* compiler, Identifier ident);
 Value lookupSymbol(Function* func, Identifier ident);
 
 Value getFuncReturnValue(Arena* arena, const FunctionDeclaration* decl, Location location);
+
+Value internString(Compiler* compiler, const char* data, int length);
+void emitInternedStrings(Compiler* compiler);
 
 #endif
 

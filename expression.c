@@ -58,7 +58,9 @@ static const Expression* binaryLiteral(
             result = left * right;
             break;
         case BINARY_DIVIDE:
-            ASSERT(right != 0, "cannot divide by 0");
+            if (right == 0) {
+                return NULL;
+            }
             result = left / right;
             break;
         case BINARY_SHIFT_LEFT:
@@ -69,6 +71,15 @@ static const Expression* binaryLiteral(
             break;
         case BINARY_EQUAL:
             result = left == right;
+            break;
+        case BINARY_BITWISE_OR:
+            result = left | right;
+            break;
+        case BINARY_BITWISE_AND:
+            result = left & right;
+            break;
+        case BINARY_BITWISE_XOR:
+            result = left ^ right;
             break;
         case BINARY_NOT_EQUAL:
         case BINARY_LOGICAL_AND:
@@ -244,6 +255,30 @@ const Expression* exprFunctionCall(
     return expr;
 }
 
+const Expression* exprSizeofType(Arena* arena, const Type* type, Location location) {
+    Expression* expr = exprNew(arena, EXPR_SIZEOF);
+    expr->exprSizeOf.hasType = true;
+    expr->exprSizeOf.type = type;
+    expr->location = location;
+    return expr;
+}
+
+const Expression* exprSizeofExpr(Arena* arena, const Expression* inner, Location location) {
+    Expression* expr = exprNew(arena, EXPR_SIZEOF);
+    expr->exprSizeOf.hasType = false;
+    expr->exprSizeOf.expr = inner;
+    expr->location = location;
+    return expr;
+}
+
+const Expression* exprStringLiteral(Arena* arena, const char* data, int length, Location location) {
+    Expression* expr = exprNew(arena, EXPR_STRING);
+    expr->string.data = data;
+    expr->string.length = length;
+    expr->location = location;
+    return expr;
+}
+
 static void printBinaryOperator(FILE* file, BinaryOperation op) {
     switch (op) {
         case BINARY_ADD:
@@ -288,6 +323,15 @@ static void printBinaryOperator(FILE* file, BinaryOperation op) {
         case BINARY_GREATER_EQUAL:
             fprintf(file, ">=");
             break;
+        case BINARY_BITWISE_OR:
+            fprintf(file, "|");
+            break;
+        case BINARY_BITWISE_AND:
+            fprintf(file, "&");
+            break;
+        case BINARY_BITWISE_XOR:
+            fprintf(file, "^");
+            break;
         case BINARY_NONE:
             fprintf(file, "INVALID_BINARY_OPERATOR");
             break;
@@ -316,6 +360,7 @@ void exprPrint(FILE* file, const Expression* expr) {
         fprintf(file, "Null");
         return;
     }
+
     switch (expr->type) {
         case EXPR_LITERAL:
             fprintf(file, "%d", expr->literal);
@@ -374,6 +419,17 @@ void exprPrint(FILE* file, const Expression* expr) {
             }
             fprintf(file, ")");
             break;
+        case EXPR_SIZEOF:
+            fprintf(file, "sizeof(");
+            if (expr->exprSizeOf.hasType) {
+                typePrint(file, expr->exprSizeOf.type);
+            } else {
+                exprPrint(file, expr->exprSizeOf.expr);
+            }
+            fprintf(file, ")");
+            break;
+        case EXPR_STRING:
+            fprintf(file, "\"%.*s\"", expr->string.length, expr->string.data);
     }
 }
 
@@ -383,6 +439,8 @@ bool isPure(const Expression* expr) {
         case EXPR_STACKOFFSET:
         case EXPR_VARIABLE:
         case EXPR_LABEL:
+        case EXPR_SIZEOF:
+        case EXPR_STRING:
             return true;
         case EXPR_CALL:
         case EXPR_ASSIGN:
@@ -432,6 +490,18 @@ bool exprEquals(const Expression* expr0, const Expression* expr1) {
         case EXPR_STACKOFFSET:
             return expr0->stackOffset.offset == expr1->stackOffset.offset
                 && identEquals(expr0->stackOffset.functionName, expr1->stackOffset.functionName);
+        case EXPR_SIZEOF:
+            if (expr0->exprSizeOf.hasType) {
+                if (!expr1->exprSizeOf.hasType) {
+                    return false;
+                }
+                return typeEquals(expr0->exprSizeOf.type, expr1->exprSizeOf.type);
+            }
+            if (expr1->exprSizeOf.hasType) {
+                return false;
+            }
+            return exprEquals(expr0->exprSizeOf.expr, expr1->exprSizeOf.expr);
+        case EXPR_STRING:
         case EXPR_CALL:
             // TODO: implement
             return false;
@@ -442,7 +512,20 @@ static Location exprUnaryLoc(const Expression* inner, Position outerPosition) {
     return locSpanPosition(exprLoc(inner), outerPosition);
 }
 
+bool getLiteral(const Expression* expr, int* val) {
+    if (expr->type != EXPR_LITERAL) {
+        return false;
+    }
+
+    *val = expr->literal;
+    return true;
+}
+
 Location exprLoc(const Expression* expr) {
+    if (expr == NULL) {
+        return NO_LOCATION;
+    }
+
     switch (expr->type) {
         case EXPR_VARIABLE:
             return identLoc(&expr->variable);
@@ -451,13 +534,53 @@ Location exprLoc(const Expression* expr) {
             return locSpan(exprLoc(expr->binary.left), exprLoc(expr->binary.right));
         case EXPR_CALL:
             return locSpanPosition(exprLoc(expr->call.name), expr->call.endPosition);
+        case EXPR_SIZEOF:
         case EXPR_CAST:
         case EXPR_UNARY:
         case EXPR_LITERAL:
         case EXPR_LABEL:
         case EXPR_STACKOFFSET:
+        case EXPR_STRING:
             return expr->location;
     }
     return NO_LOCATION;
+}
+
+
+static bool binaryOperationIsCondition(BinaryOperation operation) {
+    switch (operation) {
+        case BINARY_ADD:
+        case BINARY_SUBTRACT:
+        case BINARY_SHIFT_LEFT:
+        case BINARY_MULTIPLY: 
+        case BINARY_SHIFT_RIGHT:
+        case BINARY_DIVIDE:
+        case BINARY_BITWISE_OR:
+        case BINARY_BITWISE_AND:
+        case BINARY_BITWISE_XOR:
+            return false;
+        case BINARY_LOGICAL_OR:
+        case BINARY_LOGICAL_AND:
+        case BINARY_EQUAL:
+        case BINARY_NOT_EQUAL:
+        case BINARY_LESS:
+        case BINARY_LESS_EQUAL:
+        case BINARY_GREATER:
+        case BINARY_GREATER_EQUAL:
+            return true;
+        case BINARY_NONE:
+            UNREACHABLE();
+    }
+}
+
+bool exprIsCondition(const Expression* expr) {
+    switch (expr->type) {
+        case EXPR_BINARY:
+            return binaryOperationIsCondition(expr->binary.operation);
+        case EXPR_UNARY:
+            return expr->unary.operation == UNARY_NOT;
+        default:
+            return false;
+    }
 }
 

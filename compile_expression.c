@@ -1,4 +1,5 @@
 #include "compile_expression.h"
+#include "compile_condition.h"
 #include "compiler.h"
 #include "diag.h"
 #include "util.h"
@@ -11,6 +12,9 @@
         } \
     } while (0)
 
+////////////////////////////////////////////////////////////////////////////////
+/// Moving values
+////////////////////////////////////////////////////////////////////////////////
 
 static Value getValueTarget(Function* func, Target target, const Type* type) {
     switch (target.kind) {
@@ -21,7 +25,7 @@ static Value getValueTarget(Function* func, Target target, const Type* type) {
         case TARGET_ANY:
             return pushStackAnon(func, type, NO_LOCATION);
         case TARGET_DISCARD:
-            return valueDiscard();
+            return valueDiscard(type);
     }
 }
 
@@ -93,8 +97,8 @@ static Value internalImplicitCast(
         const Type* toType,
         Target target
 ) {
-    if (isValueError(&value)) {
-        return value;
+    if (isValueError(&value) || toType == NULL) {
+        return valueError();
     }
 
     const Type* fromType = value.type;
@@ -116,7 +120,12 @@ static Value internalImplicitCast(
         return widenUnsignedInteger(func, value, toType, target);
     }
 
-    printError(func->diag, valueLoc(&value), "cannot convert between types");
+    errorStart(func->diag, valueLoc(&value));
+    fprintf(stderr, "cannot cast from '");
+    typePrint(stderr, fromType);
+    fprintf(stderr, "' to '");
+    typePrint(stderr, toType);
+    fprintf(stderr, "'\n");
     return valueError();
 }
 
@@ -160,9 +169,10 @@ Value moveValueToTarget(Function* func, Value value, Target target) {
         case TARGET_VALUE:
             return moveValueToValue(func, value, target.value);
         case TARGET_DISCARD:
-            break;
+            return valueDiscard(value.type);
+
     }
-    return valueDiscard();
+    return valueDiscard(value.type);
 }
 
 static Value explicitCast(
@@ -189,45 +199,8 @@ static Value assignValue(Function* func, Value lhs, Value rhs, Target target) {
     return moveValueToTarget(func, rhs, target);
 }
 
-static Value assignDereference(
-        Function* func,
-        const Expression* pointerInto,
-        const Expression* from,
-        Target target
-) {
-    Value pvalue = compileExpression(func, pointerInto, ANY_TARGET);
-
-    ASSERT_ERROR(isPointer(pvalue.type), func, exprLoc(from),
-            "can only dereference pointer");
-
-    const Type* derefType = pvalue.type->pointer;
-
-    if (pvalue.kind == VALUE_IMMEDIATE) {
-        pvalue.kind = VALUE_DIRECT;
-        pvalue.type = derefType;
-        return compileExpression(func, from, targetValue(pvalue));
-    }
-
-    Value fromValue = compileExpression(func, from, ANY_TARGET);
-    ASSERT(typeCompatible(fromValue.type, derefType),
-            "can only dereference into compatible type");
-
-    int size = typeSize(derefType);
-
-    load(func, REG_C, pvalue, 0);
-    load(func, REG_D, pvalue, 1);
-
-    for (int i = 0; i < size; ++i) {
-        load(func, REG_A, fromValue, i);
-        emitIndexedReg(func, INS_MOV, REG_A);
-        if (i < size - 1) {
-            emitReg(func, INS_INC, REG_C);
-            emitReg(func, INS_INCC, REG_D);
-        }
-    }
-
-    return moveValueToTarget(func, fromValue, target);
-}
+static Value assignDereference(Function* func, const Expression* pointerInto,
+        const Expression* from, Target target);
 
 static Value assignExpression(
         Function* func,
@@ -243,6 +216,9 @@ static Value assignExpression(
     return moveValueToTarget(func, lhs, target);
 }
 
+////////////////////////////////////////////////////////////////////////////////
+/// Binary Expressions
+////////////////////////////////////////////////////////////////////////////////
 
 static Value performUncheckedBinary(
     Function* func,
@@ -298,7 +274,7 @@ static Value performSimpleBinary(
     ASSERT_ERROR(isInteger(lhs.type), func, valueLoc(&lhs), "must be integer");
     ASSERT_ERROR(isInteger(rhs.type), func, valueLoc(&rhs), "must be integer");
 
-    const Type* common = commonType(lhs.type, rhs.type, &target);
+    const Type* common = commonType(func->diag, lhs.type, rhs.type, &target, locSpan(valueLoc(&lhs), valueLoc(&rhs)));
 
     lhs = moveValueToTarget(func, lhs, targetType(common));
     rhs = moveValueToTarget(func, rhs, targetType(common));
@@ -306,7 +282,7 @@ static Value performSimpleBinary(
     return performUncheckedBinary(func, lhs, rhs, first, rest, binop, target);
 }
 
-static Value multiplyByImmediate(Function* func, Value lhs, int rhs, Target target);
+static Value multiplyByImmediate(Function* func, Value lhs, int rhs, Location rhsLocation, Target target);
 static Value divideByImmediate(Function* func, Value lhs, int rhs, Target target);
 
 static Value pointerAllowedArithmetic(
@@ -329,18 +305,22 @@ static Value pointerAllowedArithmetic(
     if (isPointer(lhs.type)) {
         ASSERT_ERROR(isInteger(rhs.type), func, valueLoc(&rhs), "must be integer");
 
-        rhs = multiplyByImmediate(func, rhs, typeSize(lhs.type->pointer), targetType(&typeUInt));
+        if (isArray(lhs.type)) {
+            lhs.type = typePointer(func->lifetime, lhs.type->pointer);
+        }
+
+        rhs = multiplyByImmediate(func, rhs, typeSize(lhs.type->pointer), NO_LOCATION, targetType(&typeUInt));
         pointerType = lhs.type;
-        lhs.type = typeInteger(func->lifetime, SIGN_UNSIGNED, SIZE_INT);
+        //lhs.type = typeInteger(func->lifetime, SIGN_UNSIGNED, SIZE_INT);
 
         Value result = performUncheckedBinary(func, lhs, rhs, first, rest, binop, target);
         result.type = pointerType;
-        return result;
+        return moveValueToTarget(func, result, target);
     }
 
     Value result = performSimpleBinary(func, lhs, rhs, first, rest, binop, target);
     
-    return result;
+    return moveValueToTarget(func, result, target);
 }
 
 static Value addValues(Function* func, Value lhs, Value rhs, Target target) {
@@ -362,11 +342,14 @@ static Value leftShiftByImmediate(
         Function* func,
         Value toShift,
         int shiftBy,
+        Location shiftByLocation,
         Target target
 ) {
     if (shiftBy == 0) {
         return moveValueToTarget(func, toShift, target);
     }
+
+    ASSERT_ERROR(shiftBy > 0, func, shiftByLocation, "shift count is negative");
 
     Value tvalue = getValueTarget(func, target, toShift.type);
     toShift = moveValueToTarget(func, toShift, targetType(tvalue.type));
@@ -414,19 +397,29 @@ static Value leftShiftValue(
 
     int literal = 0;
     if (immediateResolved(&shiftBy, &literal)) {
-        return leftShiftByImmediate(func, toShift, literal, target);
+        return leftShiftByImmediate(func, toShift, literal, valueLoc(&shiftBy), target);
     }
 
     UNIMPLEMENTED();
 }
 
-static Value multiplyByImmediate(Function* func, Value lhs, int rhs, Target target) {
+static Value multiplyByImmediate(Function* func, Value lhs, int rhs, Location rhsLocation, Target target) {
     if (rhs == 0) {
         return moveValueToTarget(func, valueZero(lhs.type), target);
     }
 
+    if (isImmediate(&lhs)) {
+        const Expression* expr = exprBinary(
+                func->lifetime,
+                BINARY_MULTIPLY,
+                lhs.expression,
+                exprLiteral(func->lifetime, rhs, rhsLocation));
+        Value value = valueImmediateExpr(lhs.type, expr);
+        return moveValueToTarget(func, value, target);
+    }
+
     if (rhs > 0 && intIsPowerOf2(rhs)) {
-        return leftShiftByImmediate(func, lhs, ceilLog2(rhs), target);
+        return leftShiftByImmediate(func, lhs, ceilLog2(rhs), rhsLocation, target);
     }
 
     UNIMPLEMENTED();
@@ -436,18 +429,15 @@ static Value multiplyValues(Function* func, Value lhs, Value rhs, Target target)
     ASSERT_ERROR(isInteger(lhs.type), func, valueLoc(&lhs), "must be integers");
     ASSERT_ERROR(isInteger(rhs.type), func, valueLoc(&rhs), "must be integers");
 
-    const Type* common = commonType(lhs.type, rhs.type, &target);
+    const Type* common
+        = commonType(func->diag, lhs.type, rhs.type, &target, locSpan(valueLoc(&lhs), valueLoc(&rhs)));
 
     lhs = moveValueToTarget(func, lhs, targetType(common));
     rhs = moveValueToTarget(func, rhs, targetType(common));
 
     if (isImmediate(&lhs) && isImmediate(&rhs)) {
-        const Expression* expr = exprBinary(
-                func->lifetime,
-                BINARY_MULTIPLY,
-                lhs.expression,
-                rhs.expression
-            );
+        const Expression* expr
+            = exprBinary(func->lifetime, BINARY_MULTIPLY, lhs.expression, rhs.expression);
 
         Value value = valueImmediateExpr(common, expr);
         return moveValueToTarget(func, value, target);
@@ -455,10 +445,10 @@ static Value multiplyValues(Function* func, Value lhs, Value rhs, Target target)
 
     int literal = 0;
     if (immediateResolved(&rhs, &literal)) {
-        return multiplyByImmediate(func, lhs, literal, target);
+        return multiplyByImmediate(func, lhs, literal, valueLoc(&rhs), target);
     }
     if (immediateResolved(&lhs, &literal)) {
-        return multiplyByImmediate(func, rhs, literal, target);
+        return multiplyByImmediate(func, rhs, literal, valueLoc(&lhs), target);
     }
 
     UNIMPLEMENTED();
@@ -508,7 +498,6 @@ static Value divideByImmediate(Function* func, Value lhs, int rhs, Target target
     UNIMPLEMENTED();
 }
 
-
 static Value binaryExpression(
     Function* func,
     BinaryOperation operation,
@@ -529,6 +518,12 @@ static Value binaryExpression(
         case BINARY_DIVIDE:
             UNIMPLEMENTED();
             break;
+        case BINARY_BITWISE_OR:
+            return performSimpleBinary(func, lhs, rhs, INS_OR, INS_OR, BINARY_BITWISE_OR, target);
+        case BINARY_BITWISE_AND:
+            return performSimpleBinary(func, lhs, rhs, INS_AND, INS_AND, BINARY_BITWISE_AND, target);
+        case BINARY_BITWISE_XOR:
+            return performSimpleBinary(func, lhs, rhs, INS_XOR, INS_XOR, BINARY_BITWISE_XOR, target);
         case BINARY_LOGICAL_OR:
         case BINARY_LOGICAL_AND:
         case BINARY_EQUAL:
@@ -537,8 +532,7 @@ static Value binaryExpression(
         case BINARY_LESS_EQUAL:
         case BINARY_GREATER:
         case BINARY_GREATER_EQUAL:
-            UNIMPLEMENTED();
-            break;
+            PANIC("binary condition should be handled by compileCondition()");
         case BINARY_NONE:
             UNREACHABLE();
     }
@@ -556,6 +550,10 @@ static Value compileBinaryExpression(
 
     return binaryExpression(func, operation, lhs, rhs, target);
 }
+
+////////////////////////////////////////////////////////////////////////////////
+/// Unary Expressions
+////////////////////////////////////////////////////////////////////////////////
 
 static Value negateValue(Function* func, Value inner, Target target, Location location) {
     if (inner.kind == VALUE_IMMEDIATE) {
@@ -582,10 +580,6 @@ static Value addressOf(Function* func, Value inner, Target target, Location loca
 }
 
 static Value dereference(Function* func, Value pvalue, Target target, Location location) {
-    if (isValueError(&pvalue)) {
-        return pvalue;
-    }
-
     ASSERT_ERROR(isPointer(pvalue.type), func, location,
             "can only dereference pointer");
 
@@ -597,10 +591,10 @@ static Value dereference(Function* func, Value pvalue, Target target, Location l
         return moveValueToTarget(func, pvalue, target);
     }
 
-    // TODO: Should be able to deref into any implicitly castable type
-    Value tvalue = getValueTarget(func, target, pvalue.type->pointer);
-    ASSERT(typeCompatible(tvalue.type, derefType),
-            "can only dereference into compatible type");
+    Value tvalue = getValueTarget(func, target, derefType);
+    if (!typeCompatible(tvalue.type, derefType)) {
+        tvalue = getValueTarget(func, targetType(derefType), derefType);
+    }
 
     int size = typeSize(tvalue.type);
 
@@ -617,6 +611,44 @@ static Value dereference(Function* func, Value pvalue, Target target, Location l
     }
 
     return moveValueToTarget(func, tvalue, target);
+}
+
+static Value assignDereference(
+        Function* func,
+        const Expression* pointerInto,
+        const Expression* from,
+        Target target
+) {
+    Value pvalue = compileExpression(func, pointerInto, ANY_TARGET);
+
+    ASSERT_ERROR(isPointer(pvalue.type), func, exprLoc(from),
+            "can only dereference pointer");
+
+    const Type* derefType = pvalue.type->pointer;
+
+    if (pvalue.kind == VALUE_IMMEDIATE) {
+        pvalue.kind = VALUE_DIRECT;
+        pvalue.type = derefType;
+        return compileExpression(func, from, targetValue(pvalue));
+    }
+
+    Value fromValue = compileExpression(func, from, targetType(derefType));
+
+    int size = typeSize(derefType);
+
+    load(func, REG_C, pvalue, 0);
+    load(func, REG_D, pvalue, 1);
+
+    for (int i = 0; i < size; ++i) {
+        load(func, REG_A, fromValue, i);
+        emitIndexedReg(func, INS_MOV, REG_A);
+        if (i < size - 1) {
+            emitReg(func, INS_INC, REG_C);
+            emitReg(func, INS_INCC, REG_D);
+        }
+    }
+
+    return moveValueToTarget(func, fromValue, target);
 }
 
 static Value compileUnaryExpression(
@@ -641,6 +673,9 @@ static Value compileUnaryExpression(
     }
 }
 
+////////////////////////////////////////////////////////////////////////////////
+/// Other Expressions
+////////////////////////////////////////////////////////////////////////////////
 
 static Value compileFunctionCall(
         Function* func,
@@ -656,7 +691,9 @@ static Value compileFunctionCall(
 
     const Declaration* decl = lookupGlobal(func->compiler, name);
 
-    ASSERT_ERROR(decl != NULL, func, exprLoc(nameExpr), "function '%.*s' does not exist", name.length, name.start);
+    ASSERT_ERROR(decl != NULL, func, exprLoc(nameExpr), "function '%.*s' does not exist",
+            name.length, name.start);
+
     ASSERT_ERROR(decl->kind == DECL_FUNCTION, func, exprLoc(nameExpr),
             "can only call a function");
 
@@ -683,7 +720,7 @@ static Value compileFunctionCall(
     emitValue(func, INS_CALL, valueImmediateExpr(&typeAnyInt, nameExpr), 0);
 
     if (isVoid(funcDecl->returnType) || target.kind == TARGET_DISCARD) {
-        return valueDiscard();
+        return valueDiscard(&typeVoid);
     }
 
     Value rvalue = getFuncReturnValue(func->lifetime, funcDecl, NO_LOCATION);
@@ -701,7 +738,62 @@ static Value compileLiteralExpression(Function* func, const Expression* expr, Ta
     return moveValueToTarget(func, value, target);
 }
 
+static Value compileSizeof(Function* func, const Expression* expr, Target target) {
+    const Type* ty = NULL;
+    if (expr->exprSizeOf.hasType) {
+        ty = expr->exprSizeOf.type;
+    } else {
+        Value skipLabel = createLabel(func->compiler);
+        emitJump(func, skipLabel);
+        Value value = compileExpression(func, expr->exprSizeOf.expr, DISCARD_TARGET);
+        emitLabel(func, skipLabel);
+        ty = value.type;
+    }
+
+    const Expression* sizeExpr = exprLiteral(func->lifetime, typeSize(ty), exprLoc(expr));
+    Value value = valueImmediateExpr(&typeUInt, sizeExpr);
+    return moveValueToTarget(func, value, target);
+}
+
+static Value compileString(Function* func, const Expression* expr, Target target) {
+    Value label = internString(func->compiler, expr->string.data, expr->string.length);
+    return moveValueToTarget(func, label, target);
+}
+
+static Value compileConditionIntoValue(Function* func, const Expression* expr, Target target) {
+    Value zero = valueConstant(func->lifetime, NULL, 0, NO_LOCATION);
+    Value trueLabel = createLabel(func->compiler);
+    compileCondition(func, expr, conditionTarget(trueLabel, MAINTAIN));
+    load(func, REG_A, zero, 0);
+    Value skipLabel = createLabel(func->compiler);
+    emitJump(func, skipLabel);
+    emitLabel(func, trueLabel);
+    load(func, REG_A, valueConstant(func->lifetime, NULL, 1, NO_LOCATION), 0);
+    emitLabel(func, skipLabel);
+
+    Value tvalue = getValueTarget(func, target, &typeBool);
+    ASSERT_ERROR(isInteger(tvalue.type), func, exprLoc(expr), "can only assign a boolean to integer type");
+
+    store(func, tvalue, 0, REG_A);
+
+    int size = typeSize(tvalue.type);
+    if (size == 1) {
+        return tvalue;
+    }
+
+    load(func, REG_A, zero, 0);
+    for (int i = 1; i < size; ++i) {
+        store(func, tvalue, i, REG_A);
+    }
+
+    return tvalue;
+}
+
 Value compileExpression(Function* func, const Expression* expr, Target target) {
+    if (exprIsCondition(expr)) {
+        return compileConditionIntoValue(func, expr, target);
+    }
+
     switch (expr->type) {
         case EXPR_LABEL:
         case EXPR_STACKOFFSET:
@@ -722,7 +814,12 @@ Value compileExpression(Function* func, const Expression* expr, Target target) {
         case EXPR_CALL:
             return compileFunctionCall(func, expr->call.name,
                     expr->call.argumentCount, expr->call.arguments, target);
+        case EXPR_SIZEOF:
+            return compileSizeof(func, expr, target);
+        case EXPR_STRING:
+            return compileString(func, expr, target);
     }
 
     UNREACHABLE();
 }
+

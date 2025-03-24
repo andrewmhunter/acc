@@ -6,6 +6,7 @@
 
 typedef enum {
     TOK_PRAGMA,
+    TOK_INCLUDE_ASM,
 
     TOK_PAREN_LEFT,
     TOK_PAREN_RIGHT,
@@ -15,6 +16,7 @@ typedef enum {
     TOK_SQUARE_RIGHT,
 
     TOK_SEMICOLON,
+    TOK_COLON,
     TOK_COMMA,
     TOK_EQUAL,
     TOK_EQUAL_EQUAL,
@@ -23,6 +25,8 @@ typedef enum {
 
     TOK_NUMBER,
     TOK_IDENTIFIER,
+    TOK_STRING,
+    TOK_CHARLITERAL,
 
     TOK_LESS,
     TOK_LESS_EQUAL,
@@ -33,10 +37,17 @@ typedef enum {
     TOK_ELSE,
     TOK_WHILE,
     TOK_DO,
+    TOK_FOR,
+    TOK_GOTO,
+    TOK_SIZEOF,
     TOK_RETURN,
+    TOK_BREAK,
+    TOK_CONTINUE,
 
     TOK_INT,
     TOK_CHAR,
+    TOK_INT24_T,
+    TOK_LONG,
     TOK_UNSIGNED,
     TOK_VOID,
 
@@ -50,6 +61,7 @@ typedef enum {
 
     TOK_BIT_AND,
     TOK_BIT_OR,
+    TOK_BIT_XOR,
 
     TOK_LOG_AND,
     TOK_LOG_OR,
@@ -66,6 +78,7 @@ typedef struct {
 } Token;
 
 typedef struct {
+    Diagnostics* diag;
     const char* textStart;
     const char* tokenStart;
     const char* tokenEnd;
@@ -73,7 +86,7 @@ typedef struct {
     Token peekValue;
 } Scanner;
 
-Scanner newScanner(const char* text);
+Scanner newScanner(Diagnostics* diag, const char* text);
 Token nextToken(Scanner* scan);
 //Token peek(Scanner* scan);
 Token tokenNull();
